@@ -267,8 +267,16 @@ class OutfitTab(QWidget):
         dlg = DayDialog(self, ch.name, last)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        self.session = OutfitSession(ch, dlg.context())
+        ctx = dlg.context()
+        # the Interact tab follows the new day: take over the answers and start a fresh chat
+        old_state = ch.data.get("state", {})
+        ch.data["state"] = {"mood": ctx.mood, "activity": ctx.activity, "setting": ctx.setting,
+                            "weather": ctx.weather, "affinity": old_state.get("affinity", 0.0)}
+        ch.data["chat_log"] = []
+        ch.save()
+        self.session = OutfitSession(ch, ctx)
         self._build()
+        self.state.characters_changed.emit()
 
     def _build(self, allow_incomplete: bool = False):
         try:

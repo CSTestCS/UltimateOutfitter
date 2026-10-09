@@ -86,6 +86,12 @@ class MainWindow(QMainWindow):
 
 
 def main(argv=None) -> int:
+    from PySide6.QtCore import QCoreApplication, Qt
+    QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
+    try:  # Qt WebEngine must be imported before the QApplication exists
+        import PySide6.QtWebEngineWidgets  # noqa: F401
+    except ImportError:
+        pass
     app = QApplication(sys.argv if argv is None else argv)
     app.setApplicationName("Ultimate Outfitter")
     app.setStyle("Fusion")

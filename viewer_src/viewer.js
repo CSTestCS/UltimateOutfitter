@@ -205,12 +205,12 @@ function relaxArms() {
   if (!vrm || !vrm.humanoid) return;
   const l = vrm.humanoid.getNormalizedBoneNode('leftUpperArm');
   const r = vrm.humanoid.getNormalizedBoneNode('rightUpperArm');
-  if (l) l.rotation.z = 1.2;
-  if (r) r.rotation.z = -1.2;
+  if (l) l.rotation.z = -1.2;
+  if (r) r.rotation.z = 1.2;
   const la = vrm.humanoid.getNormalizedBoneNode('leftLowerArm');
   const ra = vrm.humanoid.getNormalizedBoneNode('rightLowerArm');
-  if (la) la.rotation.z = 0.15;
-  if (ra) ra.rotation.z = -0.15;
+  if (la) la.rotation.z = -0.15;
+  if (ra) ra.rotation.z = 0.15;
 }
 
 function listExpressions() {
@@ -427,32 +427,39 @@ function setPrecipitation(kind) {
   if (precipitation) { scene.remove(precipitation.points); precipitation.points.geometry.dispose(); }
   precipitation = null;
   if (!kind) return;
-  const n = kind === 'rain' ? 2500 : 1500;
-  const pos = new Float32Array(n * 3);
+  const rain = kind === 'rain';
+  const n = rain ? 2500 : 1500;
+  const per = rain ? 2 : 1;  // rain drops are short line streaks, snowflakes are points
+  const pos = new Float32Array(n * 3 * per);
   for (let i = 0; i < n; i++) {
-    pos[i * 3] = (Math.random() - 0.5) * 8;
-    pos[i * 3 + 1] = Math.random() * 5;
-    pos[i * 3 + 2] = (Math.random() - 0.5) * 8;
+    const x = (Math.random() - 0.5) * 8, y = Math.random() * 5, z = (Math.random() - 0.5) * 8;
+    for (let k = 0; k < per; k++) {
+      const j = (i * per + k) * 3;
+      pos[j] = x + k * 0.01; pos[j + 1] = y + k * 0.12; pos[j + 2] = z;
+    }
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  const mat = new THREE.PointsMaterial({
-    color: kind === 'rain' ? 0xaab8cc : 0xffffff, size: kind === 'rain' ? 0.02 : 0.04,
-    transparent: true, opacity: kind === 'rain' ? 0.6 : 0.9, depthWrite: false,
-  });
-  const points = new THREE.Points(geo, mat);
+  const points = rain
+    ? new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0xb0c0d8, transparent: true, opacity: 0.55, depthWrite: false }))
+    : new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.04, transparent: true, opacity: 0.9, depthWrite: false }));
   scene.add(points);
-  precipitation = { kind, points };
+  precipitation = { kind, points, per };
 }
 
 function updatePrecipitation(dt) {
   const arr = precipitation.points.geometry.attributes.position.array;
-  const speed = precipitation.kind === 'rain' ? 6 : 0.6;
+  const rain = precipitation.kind === 'rain';
+  const speed = rain ? 6 : 0.6;
+  const stride = 3 * precipitation.per;
   const t = performance.now() / 1000;
-  for (let i = 0; i < arr.length; i += 3) {
-    arr[i + 1] -= speed * dt;
-    if (precipitation.kind === 'snow') arr[i] += Math.sin(t + i) * 0.002;
-    if (arr[i + 1] < 0) arr[i + 1] += 5;
+  for (let i = 0; i < arr.length; i += stride) {
+    let dy = -speed * dt;
+    if (arr[i + 1] + dy < 0) dy += 5;
+    for (let k = 0; k < precipitation.per; k++) {
+      arr[i + k * 3 + 1] += dy;
+      if (!rain) arr[i + k * 3] += Math.sin(t + i) * 0.002;
+    }
   }
   precipitation.points.geometry.attributes.position.needsUpdate = true;
 }
