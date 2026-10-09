@@ -288,49 +288,71 @@ class OutfitSession:
         self.proposal[slot] = [cands[0][1]["id"]]
         return True
 
-    def build(self) -> dict[str, list[str]]:
-        """Create a full outfit proposal. Raises NoOutfitPossible if laundry is needed."""
+    def build(self, allow_incomplete: bool = False) -> dict[str, list[str]]:
+        """Create an outfit proposal.
+
+        Pieces that are missing because they are in the hamper raise NoOutfitPossible
+        (laundry would help) unless ``allow_incomplete`` is set. Pieces the character
+        simply doesn't own are skipped: the outfit is put together from whatever is
+        available and the gaps are listed in ``warnings``. NoOutfitPossible is also raised
+        when nothing at all can be worn.
+        """
         self.proposal = {}
         self.warnings = []
         required, optional, core_groups = self._slot_plan()
         owned = self.owned_slots()
-        missing: list[str] = []
-        laundry_helps = False
+        in_hamper: list[str] = []      # missing, but laundry would bring it back
+        not_owned: list[str] = []      # missing, and laundry would not help
 
         def available(slot):
             return any(self.slot_accepts(slot, e["slot"]) for e in self.dresser_entries())
 
-        # core garments: choose the alternative group with the best average top score
-        best_group, best_score = None, -1e9
+        def note_missing(slot):
+            (in_hamper if slot in owned else not_owned).append(SLOTS[slot])
+
+        # core garments: prefer a complete alternative with the best average top score;
+        # otherwise fall back to the alternative that can be filled the most
+        best_group, best_key = None, None
         for group in core_groups:
-            if not all(available(s) for s in group):
+            avail = [s for s in group if available(s)]
+            if not avail:
                 continue
-            score = sum(self.candidates(s)[0][0] for s in group if self.candidates(s)) / len(group)
-            if score > best_score:
-                best_group, best_score = group, score
-        core_missing = bool(core_groups) and best_group is None
-        if core_missing:
-            owned_group = any(all(s in owned for s in g) for g in core_groups)
-            missing.append(" / ".join("+".join(SLOTS[s] for s in g) for g in core_groups))
-            laundry_helps = laundry_helps or owned_group
+            score = sum(self.candidates(s)[0][0] for s in avail if self.candidates(s)) / len(avail)
+            key = (len(avail) == len(group), len(avail) / len(group), score)
+            if best_key is None or key > best_key:
+                best_group, best_key = group, key
+        if core_groups and best_group is None:
+            # nothing from any alternative is in the dresser
+            fixable = any(all(s in owned for s in g) for g in core_groups)
+            label = " / ".join("+".join(SLOTS[s] for s in g) for g in core_groups)
+            (in_hamper if fixable else not_owned).append(label)
         elif best_group:
-            for s in best_group:
-                self._fill_slot(s)
+            for slot in best_group:
+                if not self._fill_slot(slot):
+                    note_missing(slot)
 
         for slot in required:
             if slot in self.skipped_slots:
                 continue
             if not self._fill_slot(slot):
-                if slot in owned:
-                    missing.append(SLOTS[slot])
-                    laundry_helps = True
-                else:
-                    self.warnings.append(f"{self.character.name} owns no {SLOTS[slot].lower()} items.")
-        if missing and (laundry_helps or core_missing):
-            raise NoOutfitPossible(missing, laundry_helps)
+                note_missing(slot)
+        if in_hamper and not allow_incomplete:
+            raise NoOutfitPossible(in_hamper + not_owned, True)
+        missing = in_hamper + not_owned
+        if missing:
+            self.warnings.append("Incomplete outfit - nothing suitable for: " + ", ".join(missing) + ".")
 
         acc_level = self.character.data.get("prefs", {}).get("accessory_level", 3)
-        accessories_added = 0
+        self._fill_optional(optional, acc_level, relaxed=False)
+        if not self.proposal:
+            # nothing essential could be found: take the best of whatever optional pieces exist
+            self._fill_optional(optional, acc_level, relaxed=True)
+        if not self.proposal:
+            raise NoOutfitPossible(missing or ["everything"], bool(in_hamper))
+        return self.proposal
+
+    def _fill_optional(self, optional: list[str], acc_level: int, relaxed: bool) -> None:
+        accessories_added = sum(len(ids) for sl, ids in self.proposal.items() if sl in ACCESSORY_SLOTS)
         for slot in optional:
             if slot in self.skipped_slots or slot in self.proposal:
                 continue
@@ -340,7 +362,7 @@ class OutfitSession:
             cands = self.candidates(slot)
             if not cands:
                 continue
-            threshold = 30 if not is_acc else 35 + 4 * (3 - acc_level)
+            threshold = -1e9 if relaxed else 30 if not is_acc else 35 + 4 * (3 - acc_level)
             if cands[0][0] < threshold:
                 continue
             picks = [cands[0][1]["id"]]
@@ -354,7 +376,6 @@ class OutfitSession:
             self.proposal[slot] = picks
             if is_acc:
                 accessories_added += len(picks)
-        return self.proposal
 
     # --------------------------------------------------------- feedback loop
     def slot_of(self, entry_id: str) -> str | None:

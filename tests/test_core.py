@@ -242,5 +242,31 @@ def test_underwear_counts_as_swimwear(lib, tmp_path):
     slots = {ch.data["wardrobe"][e]["category"]: sl for sl, ids in proposal.items() for e in ids}
     assert slots["Underwear Bottoms"] == "swim_bottom" and slots["Bras"] == "swim_top"
     ch.data["prefs"]["underwear_as_swimwear"] = False
-    with pytest.raises(NoOutfitPossible):
-        OutfitSession(ch, DayContext("Swimming / beach", "Happy", "Scorching hot")).build()
+    s = OutfitSession(ch, DayContext("Swimming / beach", "Happy", "Scorching hot"))
+    proposal = s.build()  # no swimwear owned: best effort instead of refusing
+    assert not {"swim_top", "swim_bottom", "swim_full"} & set(proposal)
+    assert any("Incomplete" in w for w in s.warnings)
+
+
+def test_best_effort_when_laundry_would_not_help(lib, tmp_path):
+    # only underwear owned: no tops, bottoms or shoes at all
+    ch = _wardrobe_char(lib, tmp_path, ["Underwear Bottoms", "Bras"])
+    s = OutfitSession(ch, DayContext("Work / office", "Focused", "Mild"))
+    proposal = s.build()
+    assert set(proposal) == {"underwear_bottom", "bra"}
+    assert any("Incomplete" in w for w in s.warnings)
+
+
+def test_incomplete_outfit_allowed_instead_of_laundry(lib, tmp_path):
+    ch = _wardrobe_char(lib, tmp_path, ["Underwear Bottoms", "Bras", "Shirts", "Pants", "Shoes"])
+    shoes = [e["id"] for e in ch.data["wardrobe"].values() if e["category"] == "Shoes"]
+    for e in shoes:  # every pair of shoes is dirty
+        ch.data["dresser"].remove(e)
+        ch.data["hamper"].append(e)
+    ctx = DayContext("Casual / errands", "Happy", "Mild")
+    with pytest.raises(NoOutfitPossible) as exc:
+        OutfitSession(ch, ctx).build()
+    assert exc.value.laundry_helps
+    s = OutfitSession(ch, ctx)
+    proposal = s.build(allow_incomplete=True)
+    assert "footwear" not in proposal and "base_top" in proposal

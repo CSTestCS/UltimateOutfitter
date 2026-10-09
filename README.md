@@ -113,8 +113,11 @@ Profiles are saved automatically and reopen with the app. *Open profile file…*
   * *Style:* that item is excluded in every colourway.
 * When every piece is approved, *Wear this outfit* saves it as the current outfit, keeps a history entry and contact sheet, and
   moves the pieces from the dresser to the **hamper**.
-* If no suitable outfit can be made because the needed pieces are in the hamper, the app asks you to request
-  **laundry**, which moves everything back to the dresser. There is also a *Do laundry* button.
+* If needed pieces are in the hamper, the app offers to **do laundry**, which moves everything back to the dresser.
+  You can also choose *Wear what's available* to go without those pieces. There is also a *Do laundry* button.
+* If the character simply doesn't own something (e.g. no tops, shoes or swimwear), laundry wouldn't help. The app
+  then does its best with what exists, even if that's only underwear, and lists the missing parts above the outfit.
+  Complete outfits are always preferred when possible.
 
 ## E. Upscaler
 

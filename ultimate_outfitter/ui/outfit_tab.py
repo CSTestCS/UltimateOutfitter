@@ -268,22 +268,30 @@ class OutfitTab(QWidget):
         self.session = OutfitSession(ch, dlg.context())
         self._build()
 
-    def _build(self):
+    def _build(self, allow_incomplete: bool = False):
         try:
-            self.session.build()
+            self.session.build(allow_incomplete)
         except NoOutfitPossible as exc:
-            msg = f"No suitable outfit can be made from the dresser.\nMissing: {', '.join(exc.missing)}"
-            if exc.laundry_helps:
-                r = QMessageBox.question(self, "Laundry needed", msg + "\n\nRequest laundry to return all worn "
-                                         "items from the hamper to the dresser?")
-                if r == QMessageBox.StandardButton.Yes:
+            msg = f"No complete outfit can be made from the dresser.\nMissing: {', '.join(exc.missing)}"
+            if exc.laundry_helps and not allow_incomplete:
+                box = QMessageBox(QMessageBox.Icon.Question, "Laundry needed",
+                                  msg + "\n\nRequest laundry to return all worn items from the hamper to the "
+                                  "dresser, or wear what is available now?", parent=self)
+                b_laundry = box.addButton("Do laundry", QMessageBox.ButtonRole.AcceptRole)
+                b_partial = box.addButton("Wear what's available", QMessageBox.ButtonRole.ActionRole)
+                box.addButton(QMessageBox.StandardButton.Cancel)
+                box.exec()
+                if box.clickedButton() is b_laundry:
                     do_laundry(self.session.character)
                     self.state.characters_changed.emit()
                     self._build()
                     return
+                if box.clickedButton() is b_partial:
+                    self._build(allow_incomplete=True)
+                    return
             else:
-                QMessageBox.warning(self, "Outfit", msg + "\n\nThe wardrobe has no items for these slots - "
-                                    "add clothing items and rebuild the wardrobe.")
+                QMessageBox.warning(self, "Outfit", f"{self.session.character.name} has nothing to wear "
+                                    "for this right now.\n" + msg)
             self.session = None
         self._render_proposal()
 
