@@ -9,6 +9,7 @@ A Windows desktop app (`UltimateOutfitter.exe`) for building character wardrobes
 | **C. Wardrobe Creator** | Character profiles, palette scan and automatic recoloured wardrobe generation. |
 | **D. Outfit Manager** | Dresser / hamper, daily outfit picking with approve / reject feedback and laundry. |
 | **E. Upscaler** | Upscale pixelated textures without visible pixel steps. |
+| **F. Interact** | Chat with a character, who reacts to their mood, activity, setting and outfit. |
 
 ## Getting the .exe
 
@@ -49,6 +50,10 @@ The app never overwrites files it creates automatically. If a name is taken, it 
   * There are 47 categories: all the ones requested plus Jumpsuits/Rompers/Overalls, Pajamas/Sleepwear, Leggings/Tights,
     Leg Warmers, Hair Accessories, Masks/Face Accessories, Bags/Purses, Harnesses/Garters and Costume Extras
     (ears, tails, wings).
+  * **Several images per item:** use *Add one item from several images…*, or *Add image…* in the item dialog,
+    for front and back views or separate parts. Whenever an item is recoloured or printed automatically, every
+    image of it gets exactly the same treatment, and the files are saved as `…-2.png`, `…-3.png` and so on.
+  * A question on each item says whether it can carry a print (never, the main fabric, or the whole item).
   * **Copy from an existing item:** select an item and click *Copy selected as new item…*. You can also use the
     *copy answers from an existing item* drop-down in the dialog. All answers are pre-filled, so you only change what differs.
 * **Palettes:** *Upload palette image(s)…* extracts colours from the image and lets you edit them before saving.
@@ -58,7 +63,11 @@ The app never overwrites files it creates automatically. If a name is taken, it 
   * *Ignore background* skips the image's background colour. Transparent pixels are always skipped, and *Re-extract*
     re-runs the extraction with new settings. *New from colour wheel…* opens an HSV wheel with H/S/V, R/G/B and HEX inputs. Palettes can be
   *varied hues* or *shades of one colour*, and *Generate shades* builds a shade ramp whose hue drifts slightly.
-* **Patterns:** upload any image to use as a pattern in the editor.
+* **Patterns:** upload any image, then answer a few questions about it: the kind of pattern, how bold it is, its
+  scale, formality, setting, which kinds of items it suits, and whether it goes on the main fabric or the whole
+  item. The wardrobe creator uses these answers to put suitable prints on suitable pieces.
+  * **Cutaway:** a pattern can cut holes in the garment, for lace, mesh or fishnet. Either the pattern's own
+    transparency is used, or a separate black/white mask (black = cut away).
 
 ## B. Image editor
 
@@ -69,6 +78,8 @@ The app never overwrites files it creates automatically. If a name is taken, it 
   or as a gradient map. Click a single swatch to tint the selection with that colour.
 * **Patterns:** patterns are masked to the selection. You can tile them, scale them with antialiasing on or off, offset them,
   recolour them with a palette, choose a blend mode (keep shading, replace or multiply) and set the opacity.
+* The pattern's **cutaway** can be switched on or off when applying it. *Erase texture* also restores
+  cut-away pixels.
 * **Erase texture** restores the original pixels inside the selection. Undo, redo and *Revert all* are available.
 * **Save (overwrite)** replaces the original file. **Save as new…** writes a new file.
 
@@ -77,26 +88,39 @@ The app never overwrites files it creates automatically. If a name is taken, it 
 1. Click *New character…*, choose the character image, answer the personality questions and set preferences
    (whether they wear bras, whether underwear and bras also count as swimwear, which categories they wear, and the
    maximum number of accessories).
-2. **Palette scan:** the app samples the character's colours and finds every saved palette whose colours appear in
+2. **Palette scan:** the app samples the colours of **all** the character's reference images (add more with
+   *Add reference image…*) and finds every saved palette whose colours appear in
    the character. *Precision* ranges from loose (similar colours) to exact: at 100 a palette colour must match a
    real pixel colour within ΔE 0.5. The scan checks both the character's averaged colours and its exact pixel colours. *Min. palette coverage*
    sets how many of a palette's colours must be found. You can untick a matched palette to leave it out.
-3. **Build wardrobe:** every item is rated against the character's personality, and items are ranked best to worst
-   within each category. The best items get the most recolours:
-   * top 20% of a category: every matched palette, plus 2-palette and 3-palette combinations
-   * next 30%: up to 6 single palettes and 2 two-palette combinations
-   * next 30%: 3 palettes; the rest get 1
-   * items scoring 80 or more move up a tier.
+3. **Build wardrobe:** every item is rated against the character's personality. The build then picks a realistic,
+   random selection, the way a real person's closet looks:
+   * each outfit slot gets roughly what an average person owns, about 10 tops, 7 bottoms, 4 pairs of shoes and
+     7 pairs of underwear, scaled by **Wardrobe size** (minimalist to hoarder);
+   * better-matching items are more likely to be picked (**Best-match item bias**), and only great matches get
+     several versions (**Max versions per item**);
+   * most pieces use one palette, usually a favourite (**Favourite-palette bias**). A few mix two or three palettes
+     (**Two-/Three-palette pieces**), and some get a suitable print (**Printed pieces**, **Allowed patterns**);
+   * a stored **Random seed** keeps builds repeatable. Click *New random seed* for a different selection.
+     *Exhaustive* restores the old every-item-in-every-palette behaviour;
+   * a preview lists what will be made before anything is generated. *Clear wardrobe…* removes everything so you
+     can rebuild.
+
+   When colouring automatically, the app never touches pixels below 10% opacity, which leaves leftover
+   cleanup specks alone. With a **shades of one colour** palette, the most neutral (middle) shade becomes the
+   main colour, and the lighter and darker shades are used for highlights, shading and details.
 
    Files are saved as `Characters/<Name>/Wardrobe/<Name>-<Item>-<Palette>.png` and added to the dresser.
-4. **Scan for new clothing items** processes only the items added since the last build. *Build / update* skips
+4. **Scan for new clothing items** processes only the items added since the last build. Each suitable new
+   item gets one version, and great matches sometimes get two. *Build / update* skips
    any item and palette combination that already exists.
 
 Profiles are saved automatically and reopen with the app. *Open profile file…* reopens a `profile.json`.
 
 ## D. Outfit manager
 
-* Click *Plan today's outfit…* and answer the questions: activity, mood, weather, setting (public, private / at
+* Click *Plan today's outfit…*. Activity, mood, weather, setting and dress code start on random choices, and you
+  can change any of them. The questions are: activity, mood, weather, setting (public, private / at
   home, or beach / pool) and dress code. In a private or beach / pool setting you can tick *Limit the outfit to
   underwear only*. The outfit is then just underwear (plus a bra if the character wears one), with a few optional
   extras such as jewellery, socks at home, or sandals and sunglasses at the beach.
@@ -118,6 +142,24 @@ Profiles are saved automatically and reopen with the app. *Open profile file…*
 * If the character simply doesn't own something (e.g. no tops, shoes or swimwear), laundry wouldn't help. The app
   then does its best with what exists, even if that's only underwear, and lists the missing parts above the outfit.
   Complete outfits are always preferred when possible.
+
+## F. Interact
+
+Pick a character to see their current outfit and chat with them. There is no AI model involved. Replies are
+built "madlibs"-style from a library of sentence templates with placeholders such as `{name}`, `{player}`,
+`{mood}`, `{doing}`, `{where}`, `{item}`, `{color}` and `{trait}`. Each personality has its own voice: cheerful,
+shy, confident, edgy, elegant, flirty, mysterious or laid-back, chosen from the character's traits and mood.
+
+* **Talk buttons:** greet, ask how they are, what they're doing or wearing, compliment or tease the outfit,
+  compliment them, ask their favourite colour, ask about them, tell a joke, flirt, comfort, annoy, say goodbye.
+  You can also type simple sentences, which are matched by keywords.
+* **Suggest / change:** suggest an activity or a different setting. The character may accept or refuse, depending
+  on their personality and how they feel about you. You can also set their mood, or change the weather.
+* **Outfit awareness:** the character notices when the outfit doesn't suit what they're doing. That includes
+  underwear in public, being too cold or too warm, overdressed or too casual, or wrong for the activity. They react
+  in character: shy ones get embarrassed, others get frustrated, shrug it off, joke, or tease you.
+* **Let them talk:** the character takes the initiative. They may change their own plans or mood, comment on their
+  outfit, share something, or ask you a question.
 
 ## E. Upscaler
 
