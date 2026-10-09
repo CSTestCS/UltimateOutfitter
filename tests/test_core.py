@@ -125,6 +125,7 @@ def test_full_flow(lib, tmp_path):
     assert pal_a["id"] in ids and pal_b["id"] in ids
     assert len(ids) == 2
     ch.data["gen_settings"]["min_score"] = 0
+    ch.data["gen_settings"]["multi_palette_chance"] = 0.5
     created = ch.build_wardrobe()
     assert created
     files = [ch.entry_path(e) for e in created]
@@ -190,7 +191,7 @@ def test_upscale_keeps_thin_diagonal_lines():
         assert (diag > 128).all(), m
 
 
-def _wardrobe_char(lib, tmp_path, cats, prefs=None):
+def _wardrobe_char(lib, tmp_path, cats, prefs=None, build=True):
     lib.add_palette("Ruby", ["#7A0010", "#C8102E", "#F28B9B"])
     for cat in cats:
         src = _garment(tmp_path / f"{cat.replace('/', '_')}.png")
@@ -206,7 +207,8 @@ def _wardrobe_char(lib, tmp_path, cats, prefs=None):
     ch = Character.create(lib, "Mia", tmp_path / "c.png", answers, prefs or {"wears_bra": "Yes"})
     assert ch.scan_palettes(100, 1.0)  # exact colours match at maximum precision
     ch.data["gen_settings"]["min_score"] = 0
-    ch.build_wardrobe()
+    if build:
+        ch.build_wardrobe()
     return ch
 
 
@@ -270,3 +272,86 @@ def test_incomplete_outfit_allowed_instead_of_laundry(lib, tmp_path):
     s = OutfitSession(ch, ctx)
     proposal = s.build(allow_incomplete=True)
     assert "footwear" not in proposal and "base_top" in proposal
+
+
+
+def test_realistic_wardrobe_is_limited(lib, tmp_path):
+    for i in range(6):
+        lib.add_palette(f"P{i}", [f"#{i * 40:02X}1020", f"#{i * 40:02X}5060", f"#{i * 40:02X}A0B0"])
+    ch = _wardrobe_char(lib, tmp_path, ["Shirts"], build=False)
+    for p in lib.palettes.values():  # pretend everything matched
+        ch.data["palette_scan"]["matches"].append({"palette_id": p["id"], "coverage": 1, "distance": 0})
+    plan = ch.plan_wardrobe()
+    assert 0 < len(plan) <= 10  # one shirt design is not made in every palette and combo
+    per_item = {}
+    for p in plan:
+        per_item[p["item"]["id"]] = per_item.get(p["item"]["id"], 0) + 1
+    assert max(per_item.values()) <= ch.data["gen_settings"]["max_colourways"]
+    ch.data["gen_settings"]["exhaustive"] = True
+    assert len(ch.plan_wardrobe()) > len(plan)
+
+
+def test_low_alpha_dregs_not_coloured():
+    img = np.zeros((20, 20, 4), np.uint8)
+    img[5:15, 5:15] = (200, 50, 50, 255)
+    img[0:3, 0:20] = (10, 200, 10, 20)  # 8% opaque cleanup dregs
+    mask = imaging.auto_mask(img)
+    assert not mask[0:3].any() and mask[5:15, 5:15].all()
+    out = imaging.recolor_regions(img, mask, [["#0000FF", "#00FFFF"]])
+    assert (out[0:3] == img[0:3]).all()
+
+
+def test_shades_palette_uses_neutral_as_primary():
+    img = np.full((20, 20, 4), 255, np.uint8)
+    img[:, :, :3] = (120, 120, 120)          # big main area
+    img[0:3, :, :3] = (40, 40, 40)            # small dark trim
+    mask = np.ones((20, 20), bool)
+    shades = ["#101040", "#202080", "#4040C0", "#8080E0", "#C0C0F8"]
+    out = imaging.recolor_regions(img, mask, [shades], kinds=["shades"])
+    main = colors.rgb_to_lab(out[10, 10, :3].astype(float))
+    neutral = colors.rgb_to_lab(np.array(colors.hex_to_rgb("#4040C0"), float))
+    assert np.abs(main - neutral).max() < 3
+    assert colors.rgb_to_lab(out[1, 1, :3].astype(float))[0] < main[0]
+
+
+def test_multi_image_item_and_pattern(lib, tmp_path):
+    src1 = _garment(tmp_path / "front.png")
+    src2 = _garment(tmp_path / "back.png", color=(190, 50, 50))
+    ans = _first_answers("Shirts")
+    ans["print"] = "Yes - on the main fabric"
+    t, a = categories.evaluate_answers("Shirts", ans)
+    item = lib.add_item([src1, src2], "Tee", "Shirts", ans, t, a)
+    assert len(item["images"]) == 2
+    pat = np.zeros((4, 4, 4), np.uint8)
+    pat[..., 3] = 255
+    pat[::2, ::2, :3] = 255
+    pat[1::2, 1::2, 3] = 0  # transparent holes -> cutaway
+    Image.fromarray(pat, "RGBA").save(tmp_path / "dots.png")
+    from ultimate_outfitter.core.patterns import evaluate_pattern
+    pans = {"pattern_kind": "Animal print", "pattern_boldness": "Loud / high contrast", "pattern_uses": ["Tops"]}
+    pt, pa = evaluate_pattern(pans)
+    lib.add_pattern(tmp_path / "dots.png", "Dots", pans, pt, pa, cutaway="alpha")
+    ch = _wardrobe_char(lib, tmp_path, [], build=False)
+    ch.data["gen_settings"].update(min_score=0, pattern_chance=1.0)
+    created = ch.build_wardrobe()
+    tee = [e for e in created if e["item_id"] == item["id"]]
+    assert tee and all(len(e["files"]) == 2 for e in tee)
+    assert any(e["pattern_name"] == "Dots" for e in tee)
+    e = next(e for e in tee if e["pattern"])
+    front = np.array(Image.open(ch.dir / e["files"][0]))
+    assert (front[..., 3] < 200).sum() > (np.array(Image.open(src1))[..., 3] < 200).sum()  # holes cut
+    assert e["files"][1].endswith("-2.png")
+
+
+def test_multiple_character_images(lib, tmp_path):
+    ch = _wardrobe_char(lib, tmp_path, [])
+    lib.add_palette("Teal", ["#008080", "#20B2AA"])
+    assert "Teal" not in [p["name"] for p in ch.matched_palettes()]
+    img = np.full((30, 30, 4), 255, np.uint8)
+    img[5:25, 5:15, :3] = colors.hex_to_rgb("#008080")
+    img[5:25, 15:25, :3] = colors.hex_to_rgb("#20B2AA")
+    Image.fromarray(img).save(tmp_path / "alt.png")
+    ch.add_image(tmp_path / "alt.png")
+    ch.scan_palettes(100, 1.0)
+    names = [p["name"] for p in ch.matched_palettes()]
+    assert "Teal" in names and "Ruby" in names

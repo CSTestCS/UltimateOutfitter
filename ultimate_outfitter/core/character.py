@@ -430,7 +430,7 @@ class Character:
             if not patterns or rng.random() >= gs["pattern_chance"]:
                 return None
             scored = [(pattern_score(p, item, self.traits), p) for p in patterns]
-            scored = [(sc, p) for sc, p in scored if sc > 0.15]
+            scored = [(sc, p) for sc, p in scored if sc > 0.1]
             if not scored:
                 return None
             return rng.choices([p for _, p in scored], weights=[sc * sc for sc, _ in scored])[0]
