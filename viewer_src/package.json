@@ -1,0 +1,13 @@
+{
+  "name": "ultimate-outfitter-viewer",
+  "private": true,
+  "description": "3D VRM viewport used by the Interact tab. Bundled into assets/viewer/viewer.bundle.js",
+  "scripts": {
+    "build": "esbuild viewer.js --bundle --minify --format=iife --target=es2020 --outfile=../assets/viewer/viewer.bundle.js"
+  },
+  "dependencies": {
+    "@pixiv/three-vrm": "^3.1.2",
+    "esbuild": "^0.24.0",
+    "three": "^0.169.0"
+  }
+}

@@ -386,6 +386,30 @@ KEYWORDS = [
     (r"poke|annoy|boo|loser|stupid", "annoy"),
 ]
 
+# typed suggestions -> activity / setting changes (checked before KEYWORDS)
+_SUGGEST = r"(let'?s|go|going|should|want to|wanna|how about|time to|why don'?t you|can'?t)"
+ACTIVITY_KEYWORDS = [
+    (r"\b(go to bed|go to sleep|get some sleep|bed ?time|it'?s late|sleep|nap)\b", "Sleeping"),
+    (_SUGGEST + r".*\b(work ?out|gym|exercise|train|run|jog|sport)", "Workout / sports"),
+    (_SUGGEST + r".*\b(swim|swimming|pool)", "Swimming / beach"),
+    (_SUGGEST + r".*\b(party|club|dancing|night out)", "Party / night out"),
+    (_SUGGEST + r".*\b(study|homework|class|school|read)", "School / studying"),
+    (_SUGGEST + r".*\b(work|office|job)\b", "Work / office"),
+    (_SUGGEST + r".*\b(shop|shopping|errand|groceries|eat|lunch|dinner|cafe|coffee)", "Casual / errands"),
+    (_SUGGEST + r".*\b(date)\b", "Date"),
+    (_SUGGEST + r".*\b(hike|hiking|explore|adventure|camp|outside|walk)", "Outdoors / adventure"),
+    (_SUGGEST + r".*\b(relax|chill|lounge|rest|stay in)", "Lounging at home"),
+    (_SUGGEST + r".*\b(fight|battle|spar)", "Combat / battle"),
+    (_SUGGEST + r".*\b(craft|build|make something|sew|paint)", "Manual work / crafting"),
+    (_SUGGEST + r".*\b(festival|ceremony|fair)", "Ceremony / festival"),
+    (_SUGGEST + r".*\b(gala|formal|ball|wedding)", "Formal event"),
+]
+SETTING_KEYWORDS = [
+    (_SUGGEST + r".*\b(beach|seaside|lake)", "Beach / pool"),
+    (_SUGGEST + r".*\b(go home|back home|stay home|stay at home|at home)", "Private / at home"),
+    (_SUGGEST + r".*\b(go out|outside|into town|downtown|in public)", "Public"),
+]
+
 # mood effects of each intent, per tone (fallback "any")
 MOOD_EFFECTS = {
     "compliment_outfit": {"any": ["Happy", "Confident"], "shy": ["Happy", "Romantic"], "edgy": ["Playful"]},
@@ -401,10 +425,41 @@ AFFINITY = {"compliment_outfit": 1, "compliment_them": 2, "tease_outfit": -1, "j
             "comfort": 2, "annoy": -2, "greet": 0.5}
 
 
+# template key -> (emote event, short reaction expression); tone-specific overrides below
+KEY_EMOTES: dict[str, tuple[str, str | None]] = {
+    "greet": ("wave", None), "goodbye": ("goodbye", None), "joke": ("laugh", "Laughing"),
+    "compliment_outfit": ("happy", None), "compliment_them": ("happy", None), "comfort": ("happy", None),
+    "tease_outfit": ("shrug", None), "flirt": ("blush", "Blushing"), "annoy": ("angry", "Annoyed"),
+    "about_self": ("think", "Thinking"), "unknown": ("think", "Thinking"), "init_question": ("think", "Thinking"),
+    "favorite_color": ("talk", None), "how_are_you": ("talk", None), "ask_activity": ("talk", None),
+    "ask_outfit": ("talk", None), "accept_activity": ("nod", None), "accept_setting": ("nod", None),
+    "decline_activity": ("shake_head", None), "decline_setting": ("shake_head", None),
+    "issue_embarrassed": ("embarrassed", "Embarrassed"), "issue_frustrated": ("frustrated", "Frustrated"),
+    "issue_proud": ("proud", None), "issue_teasing": ("tease", "Flirty"), "issue_joking": ("laugh", "Laughing"),
+    "issue_shrug": ("shrug", None), "issue_cold": ("shiver", "Frustrated"), "issue_hot": ("fan", None),
+    "issue_formal": ("embarrassed", "Embarrassed"), "issue_casual": ("embarrassed", "Embarrassed"),
+    "init_bored": ("stretch", None), "init_mood": ("surprised", "Surprised"), "change_mood": ("surprised", None),
+    "init_share": ("talk", None), "outfit_ok": ("proud", None),
+}
+TONE_EMOTES: dict[tuple[str, str], tuple[str, str | None]] = {
+    ("compliment_outfit", "shy"): ("blush", "Blushing"), ("compliment_them", "shy"): ("blush", "Blushing"),
+    ("compliment_outfit", "confident"): ("proud", None), ("compliment_them", "flirty"): ("flirt", "Flirty"),
+    ("tease_outfit", "shy"): ("sad", "Embarrassed"), ("tease_outfit", "cheerful"): ("laugh", "Laughing"),
+    ("tease_outfit", "flirty"): ("tease", "Flirty"), ("tease_outfit", "edgy"): ("angry", "Annoyed"),
+    ("tease_outfit", "elegant"): ("frustrated", "Annoyed"), ("tease_outfit", "confident"): ("proud", None),
+    ("flirt", "flirty"): ("flirt", "Flirty"), ("flirt", "edgy"): ("shrug", None),
+    ("flirt", "confident"): ("proud", None), ("annoy", "shy"): ("sad", "Embarrassed"),
+    ("annoy", "flirty"): ("tease", "Flirty"),
+}
+
+
 @dataclass
 class Reply:
     text: str
     changes: dict[str, Any] = field(default_factory=dict)
+    emote: str = "talk"              # emote event for the 3D viewport
+    reaction: str | None = None      # short facial reaction (expressions.txt name)
+    tone: str = ""
 
 
 class Conversation:
@@ -414,6 +469,7 @@ class Conversation:
         self.character = character
         self.player = player
         self.rng = rng or random.Random()
+        self._keys: list[tuple[str, str]] = []
         data = character.data
         st = data.setdefault("state", {})
         ctx = (data.get("current_outfit") or {}).get("context", {})
@@ -501,6 +557,7 @@ class Conversation:
 
     def say(self, intent: str, tone: str | None = None, extra: dict | None = None) -> str:
         tone = tone or self.tone()
+        self._keys.append((intent, tone))
         bank = TEMPLATES.get(intent, TEMPLATES["unknown"])
         options = list(bank.get(tone, [])) * 2 + list(bank.get("any", []))
         if not options:
@@ -667,7 +724,11 @@ class Conversation:
         log.append({"t": time.time(), "who": "char", "text": text, "intent": intent})
         del log[:-300]
         self.character.save()
-        return Reply(text, changes)
+        keys, self._keys = self._keys, []
+        # an outfit reaction is the most visible thing that happened; otherwise the main reply
+        chosen = next((k for k in reversed(keys) if k[0].startswith("issue_")), keys[0] if keys else ("unknown", ""))
+        emote, reaction = TONE_EMOTES.get(chosen, KEY_EMOTES.get(chosen[0], ("talk", None)))
+        return Reply(text, changes, emote, reaction, chosen[1])
 
     def log_player(self, text: str) -> None:
         log = self.character.data["chat_log"]
@@ -676,11 +737,22 @@ class Conversation:
 
     @staticmethod
     def intent_from_text(text: str) -> str:
+        return Conversation.parse_text(text)[0]
+
+    @staticmethod
+    def parse_text(text: str) -> tuple[str, dict]:
+        """Typed text -> (intent, arguments). Suggestions like "go to bed" become activity changes."""
         low = text.lower()
+        for pattern, setting in SETTING_KEYWORDS:
+            if re.search(pattern, low):
+                return "suggest_setting", {"setting": setting}
+        for pattern, activity in ACTIVITY_KEYWORDS:
+            if re.search(pattern, low):
+                return "suggest_activity", {"activity": activity}
         for pattern, intent in KEYWORDS:
             if re.search(pattern, low):
-                return intent
-        return "unknown"
+                return intent, {}
+        return "unknown", {}
 
 
 def _join(words: list[str]) -> str:
