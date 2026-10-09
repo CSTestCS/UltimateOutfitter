@@ -261,9 +261,10 @@ class Character:
 
     def matched_palettes(self) -> list[dict]:
         out = []
+        excluded = set(self.data["palette_scan"].get("excluded", []))
         for m in self.data["palette_scan"].get("matches", []):
             pal = self.library.palettes.get(m["palette_id"])
-            if pal:
+            if pal and pal["id"] not in excluded:
                 out.append(pal)
         return out
 

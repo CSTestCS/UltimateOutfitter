@@ -93,15 +93,25 @@ def shape_labels(img: np.ndarray, scale: float, smoothness: float = 1.0, max_col
                  progress: Progress = None) -> tuple[np.ndarray, np.ndarray]:
     """Upscale the label field of ``img`` with smoothed contours.
 
+    The label image is first enlarged with Scale2x passes, which keeps one-pixel diagonal
+    lines connected, then every colour's mask is blurred at the target size and each
+    output pixel takes the colour with the strongest mask.
     Returns (labels at the new size, colour table).
     """
     labels, table = _quantize(img, max_colors)
+    h0, w0 = labels.shape
+    nw, nh = max(1, int(round(w0 * scale))), max(1, int(round(h0 * scale)))
+    pre = labels[..., None].astype(np.int32)
+    factor = 1
+    while factor * 2 <= scale + 1e-6 and pre.shape[0] * pre.shape[1] * 4 <= 16_000_000:
+        pre = scale2x(pre)
+        factor *= 2
+    labels = pre[..., 0]
     h, w = labels.shape
-    nw, nh = max(1, int(round(w * scale))), max(1, int(round(h * scale)))
     best = np.full((nh, nw), -1e9, dtype=np.float32)
     out = np.zeros((nh, nw), dtype=np.int32)
     sigma = smoothness * scale * 0.5
-    pad = 2 + int(np.ceil(smoothness))
+    pad = (2 + int(np.ceil(smoothness))) * factor
     n = len(table)
     for i in range(n):
         sel = labels == i
@@ -111,12 +121,10 @@ def shape_labels(img: np.ndarray, scale: float, smoothness: float = 1.0, max_col
         y0, y1 = max(0, ys.min() - pad), min(h, ys.max() + pad + 1)
         x0, x1 = max(0, xs.min() - pad), min(w, xs.max() + pad + 1)
         crop = sel[y0:y1, x0:x1].astype(np.float32)
-        # target coordinates of this crop in the output
         ty0, ty1 = int(round(y0 * nh / h)), int(round(y1 * nh / h))
         tx0, tx1 = int(round(x0 * nw / w)), int(round(x1 * nw / w))
         if ty1 <= ty0 or tx1 <= tx0:
             continue
-        # nearest-upscale then blur gives smooth contours that are rotation-friendly
         up = np.array(Image.fromarray(crop, "F").resize((tx1 - tx0, ty1 - ty0), Image.NEAREST))
         up = gaussian_blur(up, sigma)
         region = best[ty0:ty1, tx0:tx1]
@@ -160,7 +168,7 @@ def upscale_blend(img: np.ndarray, scale: float, smoothness: float = 1.0, blend_
                   max_colors: int = 64, progress: Progress = None) -> np.ndarray:
     """Smoothed shapes with gradient transitions (in-between colours) at every colour change."""
     sharp = upscale_shape(img, scale, smoothness, max_colors, progress).astype(np.float32)
-    sigma = max(0.5, blend_width * scale * 0.45)
+    sigma = max(0.5, blend_width * scale * 0.25)
     a = sharp[..., 3:4] / 255.0
     pre = np.concatenate([sharp[..., :3] * a, sharp[..., 3:4]], axis=-1)
     blurred = gaussian_blur(pre, sigma)

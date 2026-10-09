@@ -176,3 +176,15 @@ def test_full_flow(lib, tmp_path):
     # profile reloads from disk
     again = Character(lib, ch.path)
     assert again.data["wardrobe"].keys() == ch.data["wardrobe"].keys()
+
+
+def test_upscale_keeps_thin_diagonal_lines():
+    img = np.zeros((16, 16, 4), np.uint8)
+    img[..., 3] = 255
+    for i in range(16):
+        img[i, i, :3] = 255
+    for m in ("shape", "shape_aa"):
+        out = upscale.upscale(img, m, 4)
+        # every point along the diagonal stays light
+        diag = np.array([out[4 * i + 2, 4 * i + 2, 0] for i in range(1, 15)])
+        assert (diag > 128).all(), m
