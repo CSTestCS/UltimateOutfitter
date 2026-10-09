@@ -11,6 +11,7 @@ from .. import __version__
 from ..core.storage import Library, default_data_dir, load_settings, save_settings
 from .common import AppState
 from .editor_tab import EditorTab
+from .interact_tab import InteractTab
 from .library_tab import LibraryTab
 from .outfit_tab import OutfitTab
 from .upscale_tab import UpscaleTab
@@ -32,11 +33,13 @@ class MainWindow(QMainWindow):
         self.wardrobe_tab = WardrobeTab(self.state)
         self.outfit_tab = OutfitTab(self.state)
         self.upscale_tab = UpscaleTab(self.state)
+        self.interact_tab = InteractTab(self.state)
         self.tabs.addTab(self.library_tab, "A. Collection")
         self.tabs.addTab(self.editor_tab, "B. Image Editor")
         self.tabs.addTab(self.wardrobe_tab, "C. Wardrobe Creator")
         self.tabs.addTab(self.outfit_tab, "D. Outfit Manager")
         self.tabs.addTab(self.upscale_tab, "E. Upscaler")
+        self.tabs.addTab(self.interact_tab, "F. Interact")
         self.setCentralWidget(self.tabs)
         self.state.open_in_editor.connect(lambda *_: self.tabs.setCurrentWidget(self.editor_tab))
         self.state.open_in_upscaler.connect(lambda *_: self.tabs.setCurrentWidget(self.upscale_tab))

@@ -1,6 +1,8 @@
 """Character outfit manager: dresser, hamper, daily outfit with approve / reject."""
 from __future__ import annotations
 
+import random
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
                                QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -37,12 +39,12 @@ class DayDialog(QDialog):
             lambda t: (self.underwear_only.setEnabled(t != "Public"),
                        t == "Public" and self.underwear_only.setChecked(False)))
         self.notes = QLineEdit()
-        for combo, key in ((self.activity, "activity"), (self.mood, "mood"), (self.weather, "weather"),
-                           (self.setting, "setting")):
-            if last.get(key):
-                combo.setCurrentText(last[key])
+        # every selector starts on a random choice; the user can still change them
+        rng = random.Random()
+        for combo in (self.activity, self.mood, self.weather, self.setting, self.formality):
+            combo.setCurrentIndex(rng.randrange(combo.count()))
         self.underwear_only.setEnabled(self.setting.currentText() != "Public")
-        self.underwear_only.setChecked(bool(last.get("underwear_only")) and self.underwear_only.isEnabled())
+        self.underwear_only.setChecked(False)
         f = QFormLayout(self)
         f.addRow(QLabel(f"<b>What is {name} doing today?</b>"))
         f.addRow("Main activity", self.activity)
