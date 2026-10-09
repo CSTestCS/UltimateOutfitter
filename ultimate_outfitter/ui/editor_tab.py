@@ -225,6 +225,20 @@ class EditorTab(QWidget):
         sf.addRow("Strength", self.strength)
         rl.addLayout(sf)
         rl.addWidget(b_recolor)
+        rl.addWidget(QLabel("Palettes named “Metallic…” or “Silk…” add their shine automatically."))
+        shine_row = QHBoxLayout()
+        self.shine_kind = QComboBox()
+        self.shine_kind.addItem("Metallic shine", "metallic")
+        self.shine_kind.addItem("Silk sheen", "silk")
+        self.shine_strength = QSlider(Qt.Orientation.Horizontal)
+        self.shine_strength.setRange(10, 100)
+        self.shine_strength.setValue(100)
+        b_shine = QPushButton("Add shine to selection")
+        b_shine.clicked.connect(self.add_shine)
+        shine_row.addWidget(self.shine_kind)
+        shine_row.addWidget(self.shine_strength, 1)
+        shine_row.addWidget(b_shine)
+        rl.addLayout(shine_row)
 
         # ---- pattern
         pat_box = QGroupBox("Pattern (masked to the selection)")
@@ -580,8 +594,24 @@ class EditorTab(QWidget):
             if p2:
                 pals.append(p2)
                 kinds.append(self._palette_kind(self.palette2_combo))
-            out = imaging.recolor_regions(self.image, self.selection, pals, strength=strength, kinds=kinds)
+            pal_masks: list = []
+            outs, _ = imaging.recolor_regions_multi([self.image], [self.selection], pals, kinds,
+                                                    strength=strength, palette_masks_out=pal_masks)
+            out = outs[0]
+            # a palette named "Metallic..." / "Silk..." shines only where it was applied
+            for g, combo in enumerate([self.palette_combo, self.palette2_combo][:len(pals)]):
+                pal = self.state.library.palettes.get(combo.currentData())
+                kind = imaging.shine_kind(pal["name"]) if pal else None
+                if kind and pal_masks and pal_masks[0][g].any():
+                    out = imaging.apply_shine(out, pal_masks[0][g], kind)
         self._commit(out)
+
+    @busy
+    def add_shine(self, *_):
+        if self._require_selection():
+            mask = self.selection & (self.image[..., 3] > 0)
+            self._commit(imaging.apply_shine(self.image, mask, self.shine_kind.currentData(),
+                                             self.shine_strength.value() / 100))
 
     @busy
     def tint_color(self, color: str):

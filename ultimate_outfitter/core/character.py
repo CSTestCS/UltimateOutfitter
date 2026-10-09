@@ -11,10 +11,11 @@ from pathlib import Path
 from typing import Any, Callable
 
 import numpy as np
+from PIL import Image
 
 from .categories import CATEGORY_BY_NAME, CATEGORY_NAMES, O, Q, Question
 from .colors import extract_colors, extract_exact_colors, hex_to_rgb, palette_match, precision_to_threshold, rgb_to_hex, rgb_to_lab
-from .imaging import apply_pattern, auto_mask, foreground_mask, load_rgba, recolor_regions_multi, save_rgba
+from .imaging import MIN_AUTO_ALPHA, apply_pattern, apply_shine, auto_mask, shine_kind, foreground_mask, load_rgba, recolor_regions_multi, save_rgba
 from .patterns import load_pattern, pattern_score
 from .storage import Library, new_id, safe_name, unique_path, write_json_atomic
 from .traits import add_into, cosine, normalize
@@ -485,16 +486,24 @@ class Character:
         return out
 
     def render_piece(self, item: dict, palettes: list[dict], pattern: dict | None,
-                     cache: dict | None = None) -> list[np.ndarray]:
-        """Recolour (and optionally print) every image of an item the same way."""
+                     cache: dict | None = None, shine_out: list | None = None) -> list[np.ndarray]:
+        """Recolour (and optionally print) every image of an item the same way.
+
+        Palettes whose name contains "metallic" or "silk" (also chrome / metal / satin) get a
+        shine on exactly the pixels they coloured; if no palette asks for it but the item's
+        own name does, the item's main palette shines. ``shine_out`` receives, per image,
+        the (mask, kind) pairs that were applied.
+        """
         cache = cache if cache is not None else {}
         if item["id"] not in cache:
             imgs = [load_rgba(self.library.abspath(rel)) for rel in Library.item_images(item)]
             cache.clear()
             cache[item["id"]] = (imgs, [auto_mask(im) for im in imgs])
         imgs, masks = cache[item["id"]]
+        pal_masks: list = []
         outs, primaries = recolor_regions_multi(imgs, masks, [p["colors"] for p in palettes],
-                                                [p.get("kind", "varied") for p in palettes])
+                                                [p.get("kind", "varied") for p in palettes],
+                                                palette_masks_out=pal_masks)
         if pattern:
             pat, cut = load_pattern(self.library, pattern)
             pat_palette = palettes[1]["colors"] if len(palettes) > 1 else palettes[0]["colors"]
@@ -511,6 +520,19 @@ class Character:
                 outs[i] = apply_pattern(out, region, pat, scale=scale, antialias=True,
                                         palette=pat_palette, blend="shaded", cutaway=cut,
                                         offset=(int(xs[0]), 0))
+        # metallic / silk shine, limited to the pixels of the palette that asks for it
+        shiny = [(g, shine_kind(p["name"])) for g, p in enumerate(palettes) if shine_kind(p["name"])]
+        if not shiny and shine_kind(item["name"]):
+            shiny = [(0, shine_kind(item["name"]))]
+        for i in range(len(outs)):
+            applied = []
+            for g, kind in shiny:
+                m = pal_masks[i][g] & (outs[i][..., 3] >= MIN_AUTO_ALPHA) if pal_masks else None
+                if m is not None and m.any():
+                    outs[i] = apply_shine(outs[i], m, kind)
+                    applied.append((m, kind))
+            if shine_out is not None:
+                shine_out.append(applied)
         return outs
 
     def build_wardrobe(self, item_ids: list[str] | None = None,
@@ -535,8 +557,9 @@ class Character:
             if progress and progress(i, total, label) is False:
                 unfinished = {p["item"]["id"] for p in plan[i:]}
                 break
+            shine: list = []
             try:
-                outs = self.render_piece(item, combo, pattern, cache)
+                outs = self.render_piece(item, combo, pattern, cache, shine_out=shine)
             except OSError:
                 continue
             base = safe_name(f"{self.name}-{item['name']}-{pal_names}" + (f"-{pattern['name']}" if pattern else ""))
@@ -546,6 +569,20 @@ class Character:
                 dest = first if n == 0 else unique_path(first.with_name(f"{first.stem}-{n + 1}.png"))
                 save_rgba(out, dest)
                 files.append(dest.relative_to(self.dir).as_posix())
+            # save each shine mask (white = shiny) so the effect can be traced / reused
+            shine_files = []
+            for n, applied in enumerate(shine):
+                if not applied:
+                    continue
+                combined = np.zeros(applied[0][0].shape, dtype=bool)
+                for m, _kind in applied:
+                    combined |= m
+                mask_dir = self.wardrobe_dir / "Masks"
+                mask_dir.mkdir(exist_ok=True)
+                mpath = unique_path(mask_dir / f"{Path(files[n]).stem}-shine.png")
+                Image.fromarray((combined * 255).astype(np.uint8), "L").save(mpath)
+                shine_files.append(mpath.relative_to(self.dir).as_posix())
+            shine_kinds = sorted({k for applied in shine for _m, k in applied})
             cat = CATEGORY_BY_NAME.get(item["category"])
             entry = {
                 "id": new_id(), "item_id": item["id"], "item_name": item["name"],
@@ -554,6 +591,7 @@ class Character:
                 "pattern": pattern["id"] if pattern else None,
                 "pattern_name": pattern["name"] if pattern else None,
                 "file": files[0], "files": files, "rating": score, "created": time.time(),
+                "shine": shine_kinds, "shine_masks": shine_files,
             }
             self.data["wardrobe"][entry["id"]] = entry
             self.data["dresser"].append(entry["id"])
@@ -580,7 +618,7 @@ class Character:
             if entry_id in self.data[key]:
                 self.data[key].remove(entry_id)
         if entry and delete_file:
-            for rel in entry.get("files") or [entry["file"]]:
+            for rel in (entry.get("files") or [entry["file"]]) + entry.get("shine_masks", []):
                 try:
                     (self.dir / rel).unlink()
                 except OSError:

@@ -461,3 +461,39 @@ def test_reply_emotes_and_typed_suggestions(lib, tmp_path):
     r = conv.respond("suggest_activity", activity="Sleeping")
     assert r.emote in ("nod", "shake_head") or r.emote.startswith(("embarrassed", "shrug", "laugh", "frustrated",
                                                                    "proud", "tease", "shiver", "fan"))
+
+
+def test_metallic_palette_shines_only_its_own_parts(lib, tmp_path):
+    from ultimate_outfitter.core.imaging import shine_kind
+    assert shine_kind("MetallicGreen") == "metallic" and shine_kind("Silk Scarf") == "silk"
+    assert shine_kind("Purple") is None
+    green = lib.add_palette("MetallicGreen", ["#0B3D20", "#1E8A4A", "#7FE0A0"])
+    purple = lib.add_palette("Purple", ["#3A1060", "#7A3AB0", "#C8A0F0"])
+    plain_green = dict(green, name="Green")
+    src = _garment(tmp_path / "hat.png", color=(150, 150, 150), accent=(40, 40, 40))
+    ans = _first_answers("Hats")
+    t, a = categories.evaluate_answers("Hats", ans)
+    hat = lib.add_item(src, "Hat", "Hats", ans, t, a)
+    ch = _wardrobe_char(lib, tmp_path, [], build=False)
+    shine: list = []
+    shiny = ch.render_piece(hat, [green, purple], None, {}, shine_out=shine)[0]
+    plain = ch.render_piece(hat, [plain_green, purple], None, {})[0]
+    (mask, kind), = shine[0]
+    assert kind == "metallic" and mask.any()
+    changed = np.any(shiny != plain, axis=-1)
+    assert changed.any()
+    assert not (changed & ~mask).any()          # nothing outside the MetallicGreen parts changed
+    # building the wardrobe names the piece after the palettes and saves the mask
+    ch.data["palette_scan"]["matches"] = [{"palette_id": green["id"], "coverage": 1, "distance": 0},
+                                          {"palette_id": purple["id"], "coverage": 1, "distance": 0}]
+    plan = [{"item": hat, "score": 90, "palettes": [green, purple], "pattern": None}]
+    entry, = ch.build_wardrobe(plan=plan)
+    assert "Hat-MetallicGreen+Purple" in entry["file"]
+    assert entry["shine"] == ["metallic"] and len(entry["shine_masks"]) == 1
+    saved = np.array(Image.open(ch.dir / entry["shine_masks"][0])) > 0
+    assert (saved == mask).all()
+    # an item called "Silk ..." shines on its main palette when no palette asks for it
+    silk = lib.add_item(src, "Silk Hat", "Hats", ans, t, a)
+    shine2: list = []
+    ch.render_piece(silk, [plain_green, purple], None, {}, shine_out=shine2)
+    assert shine2[0] and shine2[0][0][1] == "silk"

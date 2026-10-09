@@ -654,6 +654,8 @@ class WardrobeTab(QWidget):
                 continue
             where = "hamper" if e["id"] in ch.data["hamper"] else "dresser"
             print_ = f" ({e['pattern_name']})" if e.get("pattern_name") else ""
+            if e.get("shine"):
+                print_ += " ✦" + "/".join(e["shine"])
             n_files = len(e.get("files") or [e["file"]])
             self.gallery.add(e["id"], f"{e['item_name']}\n{'+'.join(e['palette_names'])}{print_}",
                              ch.entry_path(e), tooltip=f"{e['category']} — match {e['rating']:.0f}\n"

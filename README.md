@@ -106,6 +106,14 @@ The app never overwrites files it creates automatically. If a name is taken, it 
    * a preview lists what will be made before anything is generated. *Clear wardrobe…* removes everything so you
      can rebuild.
 
+   **Metallic and silk shine:** if a palette's name contains *Metallic* (or *Metal* / *Chrome*) or *Silk* (or
+   *Satin*), the parts of each piece coloured with that palette get a shine. Metallic is high-contrast with
+   bright, sharp highlights; silk is a soft sheen. The app builds a mask of exactly the pixels that palette
+   coloured, so in `Hat-MetallicGreen+Purple` only the MetallicGreen parts shine and the Purple parts stay matte.
+   If no palette asks for it but the item's own name does (e.g. "Silk Scarf"), the item's main palette shines.
+   The masks are saved in `Wardrobe/Masks/`. The Image Editor applies the same rule when you recolour with such a
+   palette, and *Add shine to selection* adds a shine by hand.
+
    When colouring automatically, the app never touches pixels below 10% opacity, which leaves leftover
    cleanup specks alone. With a **shades of one colour** palette, the most neutral (middle) shade becomes the
    main colour, and the lighter and darker shades are used for highlights, shading and details.

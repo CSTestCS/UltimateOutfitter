@@ -336,7 +336,8 @@ def _assign_targets(region_ids: list[int], centers: np.ndarray, share: np.ndarra
 
 def recolor_regions_multi(imgs: Sequence[np.ndarray], masks: Sequence[np.ndarray],
                           palettes: Sequence[Sequence[str]], kinds: Sequence[str] | None = None,
-                          regions: int | None = None, strength: float = 1.0
+                          regions: int | None = None, strength: float = 1.0,
+                          palette_masks_out: list | None = None
                           ) -> tuple[list[np.ndarray], list[np.ndarray]]:
     """Recolour one clothing item (one or more images) with one or more palettes.
 
@@ -349,12 +350,16 @@ def recolor_regions_multi(imgs: Sequence[np.ndarray], masks: Sequence[np.ndarray
 
     Returns (recoloured images, primary masks) - the primary mask marks the largest
     region of the first palette in each image (used for prints / patterns).
+    If ``palette_masks_out`` is a list, it receives one entry per image: a list with one
+    boolean mask per palette marking exactly the pixels that palette coloured.
     """
     outs = [im.copy() for im in imgs]
     primaries = [np.zeros(m.shape, dtype=bool) for m in masks]
     palettes = [list(p) for p in palettes if p]
     kinds = list(kinds or [])
     kinds += ["varied"] * (len(palettes) - len(kinds))
+    if palette_masks_out is not None:
+        palette_masks_out[:] = [[np.zeros(m.shape, dtype=bool) for _ in palettes] for m in masks]
     if not palettes or not any(m.any() for m in masks):
         return outs, primaries
     total_colors = sum(len(p) for p in palettes)
@@ -369,10 +374,13 @@ def recolor_regions_multi(imgs: Sequence[np.ndarray], masks: Sequence[np.ndarray
             for r, ci in _assign_targets(region_ids, centers, share, pals[g], kinds[g]).items():
                 targets[r] = (g, ci)
     primary_region = max(groups[0], key=lambda r: share[r]) if groups[0] else int(order[0])
-    for img, mask, lbl, out, prim in zip(imgs, masks, labels, outs, primaries):
+    for n, (img, mask, lbl, out, prim) in enumerate(zip(imgs, masks, labels, outs, primaries)):
         if not mask.any():
             continue
         prim |= lbl == primary_region
+        if palette_masks_out is not None:
+            for r, (g, _ci) in targets.items():
+                palette_masks_out[n][g] |= (lbl == r) & mask
         lab_all = rgb_to_lab(img[..., :3][mask].astype(float))
         lab_labels = lbl[mask]
         new_lab = lab_all.copy()
@@ -407,6 +415,88 @@ def recolor_regions(img: np.ndarray, mask: np.ndarray, palettes: Sequence[Sequen
     """Single-image convenience wrapper around :func:`recolor_regions_multi`."""
     outs, _ = recolor_regions_multi([img], [mask], palettes, kinds, regions, strength)
     return outs[0]
+
+
+# ---------------------------------------------------------------------------
+# Material shine (metallic / silk)
+# ---------------------------------------------------------------------------
+
+SHINE_WORDS = {"metallic": "metallic", "metal": "metallic", "chrome": "metallic", "silk": "silk",
+               "silky": "silk", "satin": "silk"}
+
+
+def shine_kind(name: str) -> str | None:
+    """'metallic' or 'silk' when a name (palette or item) asks for a shine, else None."""
+    low = name.lower()
+    for word in ("metallic", "chrome", "metal", "silky", "silk", "satin"):
+        if word in low:
+            return SHINE_WORDS[word]
+    return None
+
+
+def apply_shine(img: np.ndarray, mask: np.ndarray, kind: str = "metallic", strength: float = 1.0,
+                light: tuple[float, float, float] = (-0.45, -0.7, 0.55)) -> np.ndarray:
+    """Add a metallic shine or a silk sheen to the pixels in ``mask`` only.
+
+    The shape of the masked area is turned into a soft relief (blurred mask = height),
+    giving fake surface normals that are lit from the top-left. Combined with the
+    existing shading (folds), this produces:
+      * metallic - high contrast, dark mid-tones, sharp near-white specular highlights and
+        reflection bands; colour is kept in the mid-tones and fades out in the highlights;
+      * silk - a soft, wide sheen with gentle bands; colours stay rich.
+    """
+    from .upscale import gaussian_blur
+
+    out = img.copy()
+    if not mask.any() or strength <= 0:
+        return out
+    m = mask.astype(np.float32)
+    ys, xs = np.nonzero(mask)
+    size = max(np.ptp(ys) + 1, np.ptp(xs) + 1)
+    lab = rgb_to_lab(img[..., :3][mask].astype(float))
+    L = lab[:, 0]
+    # existing shading, smoothed (normalised convolution so the outside doesn't darken edges)
+    sig_small = max(1.0, size * (0.012 if kind == "metallic" else 0.025))
+    lmap = np.zeros(mask.shape, np.float32)
+    lmap[mask] = L
+    smooth_l = (gaussian_blur(lmap, sig_small) / np.maximum(gaussian_blur(m, sig_small), 1e-3))[mask]
+    lo, hi = np.percentile(smooth_l, 2), np.percentile(smooth_l, 98)
+    shade = np.clip((smooth_l - lo) / max(hi - lo, 1e-3), 0, 1)
+    detail = L - smooth_l
+    # relief from the silhouette -> normals -> lighting
+    sig_big = max(1.5, size * 0.06)
+    height = gaussian_blur(m, sig_big)
+    gy, gx = np.gradient(height)
+    k = sig_big * 2.0
+    nx, ny, nz = -gx[mask] * k, -gy[mask] * k, np.ones(len(L))
+    norm = np.sqrt(nx * nx + ny * ny + nz * nz)
+    nx, ny, nz = nx / norm, ny / norm, nz / norm
+    lx, ly, lz = np.array(light) / np.linalg.norm(light)
+    ndl = np.clip(nx * lx + ny * ly + nz * lz, 0, 1)
+    hx, hy, hz = lx, ly, lz + 1.0
+    hn = np.sqrt(hx * hx + hy * hy + hz * hz)
+    ndh = np.clip((nx * hx + ny * hy + nz * hz) / hn, 0, 1)
+    lighting = np.clip(0.55 * shade + 0.45 * ndl, 0, 1)
+    new = lab.copy()
+    if kind == "metallic":
+        t = lighting * lighting * (3 - 2 * lighting)          # contrast curve
+        t = t * t * (3 - 2 * t)
+        bands = 7.0 * np.sin(lighting * np.pi * 3.0)          # environment reflections
+        spec = (ndh ** 40) * 55 + (shade ** 6) * 25
+        new[:, 0] = np.clip(12 + 68 * t + bands + spec + 0.5 * detail, 0, 100)
+        fade = 1 - np.clip(spec / 60, 0, 1) * 0.85            # highlights go white
+        new[:, 1] = lab[:, 1] * 1.15 * fade
+        new[:, 2] = lab[:, 2] * 1.15 * fade
+    else:  # silk
+        sheen = np.sin(lighting * np.pi * 1.25) ** 2
+        spec = (ndh ** 10) * 18
+        new[:, 0] = np.clip(L + 16 * sheen + spec - 6 * (1 - lighting), 0, 100)
+        fade = 1 - np.clip(spec / 30, 0, 1) * 0.35
+        new[:, 1] = lab[:, 1] * fade
+        new[:, 2] = lab[:, 2] * fade
+    mixed = lab * (1 - strength) + new * strength
+    out[..., :3][mask] = lab_to_rgb(mixed).round().astype(np.uint8)
+    return out
 
 
 # ---------------------------------------------------------------------------
