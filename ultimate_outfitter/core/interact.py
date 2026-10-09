@@ -85,6 +85,7 @@ ACTIVITY_PHRASES = {
     "Ceremony / festival": ("a festival", "going to the festival"),
 }
 SETTING_PHRASES = {"Public": "out in public", "Private / at home": "at home", "Beach / pool": "at the beach"}
+SETTING_TO = {"Public": "out", "Private / at home": "home", "Beach / pool": "to the beach"}
 
 # ---------------------------------------------------------------------------
 # Templates: TEMPLATES[intent][tone or "any"] -> list of sentences
@@ -270,15 +271,15 @@ TEMPLATES: dict[str, dict[str, list[str]]] = {
         "laidback": ["Eh, too much effort.", "Nah, I'm good here."],
     },
     "accept_setting": {
-        "any": ["Okay, let's head {new_where}.", "Sure, {new_where} works."],
-        "shy": ["{new_where}...? Okay, if you come too.", "A-alright."],
-        "edgy": ["Fine. {new_where}. Whatever.", "Sure, let's bounce."],
-        "flirty": ["{new_where}? Ooh, lead the way~"],
-        "elegant": ["Very well, {new_where} it is."],
+        "any": ["Okay, let's head {new_to}.", "Sure, being {new_where} sounds good."],
+        "shy": ["Go {new_to}...? Okay, if you come too.", "A-alright."],
+        "edgy": ["Fine. Going {new_to}. Whatever.", "Sure, let's bounce."],
+        "flirty": ["Going {new_to}? Ooh, lead the way~"],
+        "elegant": ["Very well, let us go {new_to}."],
     },
     "decline_setting": {
         "any": ["I'd rather stay {where}.", "Nah, I'm comfy {where}."],
-        "shy": ["I-I'd rather not go {new_where}...", "Can we stay {where}?"],
+        "shy": ["I-I'd rather not go {new_to}...", "Can we stay {where}?"],
         "confident": ["No, {where} suits me just fine."],
         "edgy": ["Not happening."],
     },
@@ -465,7 +466,9 @@ class Conversation:
     def _fill(self, template: str, tone: str, extra: dict | None = None) -> str:
         st = self.state
         pieces = self.outfit_pieces()
-        items = [self._piece_label(p) for p in pieces]
+        hidden = {"underwear_bottom", "bra"}
+        visible = [p for p in pieces if p.get("slot") not in hidden] or pieces
+        items = [self._piece_label(p) for p in visible]
         traits = self.character.traits
         top_traits = [k for k, _ in sorted(traits.items(), key=lambda t: -t[1])[:4]] or ["unique"]
         matched = self.character.matched_palettes() if hasattr(self.character, "matched_palettes") else []
@@ -585,7 +588,7 @@ class Conversation:
             return self._finish(intent, text, changes)
         if intent == "suggest_setting":
             where = kwargs["setting"]
-            extra = {"new_where": SETTING_PHRASES.get(where, where.lower())}
+            extra = {"new_where": SETTING_PHRASES.get(where, where.lower()), "new_to": SETTING_TO.get(where, "there")}
             shy = tone == "shy" and where == "Public"
             if self.rng.random() < (0.35 if shy else 0.7) + 0.04 * st["affinity"]:
                 st["setting"] = where
