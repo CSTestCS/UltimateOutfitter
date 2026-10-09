@@ -113,18 +113,32 @@ class Library:
         return dest.relative_to(self.root).as_posix()
 
     # -- items --------------------------------------------------------------
-    def add_item(self, image_src: Path | str, name: str, category: str, answers: dict,
+    def add_item(self, image_src: Path | str | list, name: str, category: str, answers: dict,
                  traits: dict, attrs: dict, notes: str = "", copied_from: str | None = None) -> dict:
+        """Add a clothing item. ``image_src`` may be one path or a list (front, back, parts...)."""
         item_id = new_id()
-        rel = self._import_file(image_src, "Items", name)
+        sources = image_src if isinstance(image_src, (list, tuple)) else [image_src]
+        rels = [self.import_item_image(src, name) for src in sources]
         item = {
-            "id": item_id, "name": name, "category": category, "image": rel,
+            "id": item_id, "name": name, "category": category, "image": rels[0], "images": rels,
             "answers": answers, "traits": traits, "attrs": attrs, "notes": notes,
             "copied_from": copied_from, "created": time.time(),
         }
         self.items[item_id] = item
         self.save()
         return item
+
+    def import_item_image(self, src: Path | str, name: str) -> str:
+        """Copy an image into the Items folder unless it already lives in the library."""
+        src = Path(src)
+        try:
+            return src.resolve().relative_to(self.root.resolve()).as_posix()
+        except ValueError:
+            return self._import_file(src, "Items", name)
+
+    @staticmethod
+    def item_images(item: dict) -> list[str]:
+        return item.get("images") or [item["image"]]
 
     def update_item(self, item_id: str, **fields: Any) -> dict:
         item = self.items[item_id]
@@ -136,10 +150,14 @@ class Library:
     def remove_item(self, item_id: str, delete_file: bool = False) -> None:
         item = self.items.pop(item_id, None)
         if item and delete_file:
-            try:
-                self.abspath(item["image"]).unlink()
-            except OSError:
-                pass
+            still_used = {r for it in self.items.values() for r in self.item_images(it)}
+            for rel in self.item_images(item):
+                if rel in still_used:
+                    continue
+                try:
+                    self.abspath(rel).unlink()
+                except OSError:
+                    pass
         self.save()
 
     # -- palettes -----------------------------------------------------------
@@ -163,11 +181,25 @@ class Library:
         self.save()
 
     # -- patterns -----------------------------------------------------------
-    def add_pattern(self, image_src: Path | str, name: str) -> dict:
+    def add_pattern(self, image_src: Path | str, name: str, answers: dict | None = None,
+                    traits: dict | None = None, attrs: dict | None = None, cutaway: str = "none",
+                    cutaway_mask_src: Path | str | None = None) -> dict:
+        """Add a pattern. ``cutaway``: "none", "alpha" (the pattern's transparency cuts
+        holes in the garment) or "mask" (a separate black/white mask image does)."""
         pid = new_id()
         rel = self._import_file(image_src, "Patterns", name)
-        pat = {"id": pid, "name": name, "image": rel, "created": time.time()}
+        mask_rel = self._import_file(cutaway_mask_src, "Patterns", f"{name}-cutaway") if cutaway_mask_src else None
+        pat = {"id": pid, "name": name, "image": rel, "answers": answers or {}, "traits": traits or {},
+               "attrs": attrs or {}, "cutaway": cutaway, "cutaway_mask": mask_rel, "created": time.time()}
         self.patterns[pid] = pat
+        self.save()
+        return pat
+
+    def update_pattern(self, pid: str, cutaway_mask_src: Path | str | None = None, **fields: Any) -> dict:
+        pat = self.patterns[pid]
+        if cutaway_mask_src:
+            pat["cutaway_mask"] = self._import_file(cutaway_mask_src, "Patterns", f"{pat['name']}-cutaway")
+        pat.update(fields)
         self.save()
         return pat
 

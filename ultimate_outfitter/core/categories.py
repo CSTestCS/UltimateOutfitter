@@ -228,6 +228,14 @@ WEATHER_Q = Q("weather_fit", "What weather is it suited for?", [
     O("Freezing / heavy winter", "cozy practical", warmth=5),
 ])
 
+PRINT_Q = Q("print", "Can this item be made with a print / pattern?", [
+    O("No - always keep it plain", "minimalist", print="none"),
+    O("Yes - on the main fabric", "", print="primary"),
+    O("Yes - over the whole item", "artistic", print="whole"),
+])
+
+NO_PRINT_SLOTS = {"jewelry", "eyes", "armor", "wrists"}
+
 ACTIVITY_Q = Q("activities", "Which activities is it suitable for? (choose any)",
                [O(a, "", activities=[a]) for a in ACTIVITIES], multi=True)
 
@@ -827,6 +835,7 @@ def questions_for(category: str) -> list[Question]:
         qs += GENERAL_BLOCK
     if cat.weather_q:
         qs.append(WEATHER_Q)
+    qs.append(PRINT_Q)
     qs.append(ACTIVITY_Q)
     # de-duplicate ids while preserving order (blocks may be reused)
     seen: set[str] = set()
@@ -850,6 +859,7 @@ def evaluate_answers(category: str, answers: dict[str, Any]) -> tuple[dict[str, 
     attrs: dict[str, Any] = {
         "warmth": cat.warmth, "formality": 1, "coverage": 2,
         "activities": list(cat.activities),
+        "print": "none" if cat.slot in NO_PRINT_SLOTS else "primary",
     }
     explicit_warmth = None
     dwarmth = 0
