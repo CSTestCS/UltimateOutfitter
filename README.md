@@ -145,14 +145,54 @@ Profiles are saved automatically and reopen with the app. *Open profile file…*
 
 ## F. Interact
 
-Pick a character to see their current outfit and chat with them. There is no AI model involved. Replies are
+Pick a character to see them in a large **3D viewport** and chat with them. Planning a new outfit of the day in
+the Outfit Manager copies its answers (mood, activity, setting and weather) into the Interact tab and starts a
+fresh chat.
+
+### 3D viewport (VRoid)
+
+* **Set VRoid model for this outfit…** loads a `.vrm` exported from VRoid Studio that shows the character in the
+  current outfit. The file is copied to `Characters/<Name>/Models/`. Outfits without a model of their own use the
+  last model loaded. *Show 2D outfit sheet* switches back to the flat outfit image.
+* **Navigation** works like other 3D software: left-drag to orbit, right- or middle-drag to pan, the wheel to zoom,
+  and **F** or *Frame* to re-centre the camera on the character.
+* **Lighting** follows the weather (sunny, cold, rain with falling rain, snow with snowfall...) and the time of day.
+  *Time* can follow the computer's clock or be set to dawn, morning, day, evening or night.
+* **Background:** a sky that matches the time and weather, a solid colour, or any image.
+* **Expressions** follow the character's mood, and the chat adds short reactions such as laughing, blushing or
+  embarrassment. The eyes keep looking at the camera (you can turn this off), and the character blinks on their own.
+* **Expressions config:** each character folder has an editable `expressions.txt`, which maps every mood and
+  reaction to blend shapes and weights. You can use VRM expressions (`happy`, `sad`, `angry`, `relaxed`,
+  `surprised`, `blink`, `aa`...) or raw VRoid blend shapes (`Fcl_ALL_Joy`, `Fcl_EYE_Close`...). Use *Edit
+  expressions…* to change it, and *List model blend shapes* to see the names your model supports.
+
+### Animations
+
+Raw **.fbx** animations go in the library's `Animations` folder (button *Animations folder*). Mixamo
+animations ("FBX Binary, Without Skin") are retargeted onto the VRoid model automatically. The file name decides
+when each one plays:
+
+* `idle_*.fbx` loops depending on the situation, e.g. `idle.fbx`, `idle_happy.fbx`, `idle_beach_hot.fbx`,
+  `idle_shy.fbx`.
+* `pose_*.fbx` is picked from the *Pose* menu, or used automatically for a matching situation.
+* `emote_<event>*.fbx` plays once as a chat reaction, e.g. `emote_wave.fbx`, `emote_laugh_shy.fbx`,
+  `emote_embarrassed_public.fbx`.
+
+All valid names (activities, moods, settings, weather, personalities and emote events) are listed in the
+`README.md` the app writes into that folder, also available as [docs/ANIMATIONS.md](docs/ANIMATIONS.md).
+
+The 3D view is built with three.js and @pixiv/three-vrm. Its source is in `viewer_src/`; rebuild the bundle with
+`npm install && npm run build`.
+
+### Chat There is no AI model involved. Replies are
 built "madlibs"-style from a library of sentence templates with placeholders such as `{name}`, `{player}`,
 `{mood}`, `{doing}`, `{where}`, `{item}`, `{color}` and `{trait}`. Each personality has its own voice: cheerful,
 shy, confident, edgy, elegant, flirty, mysterious or laid-back, chosen from the character's traits and mood.
 
 * **Talk buttons:** greet, ask how they are, what they're doing or wearing, compliment or tease the outfit,
   compliment them, ask their favourite colour, ask about them, tell a joke, flirt, comfort, annoy, say goodbye.
-  You can also type simple sentences, which are matched by keywords.
+  You can also type simple sentences, which are matched by keywords. Suggestions such as "go to bed" or
+  "let's go to the beach" become activity or setting suggestions.
 * **Suggest / change:** suggest an activity or a different setting. The character may accept or refuse, depending
   on their personality and how they feel about you. You can also set their mood, or change the weather.
 * **Outfit awareness:** the character notices when the outfit doesn't suit what they're doing. That includes

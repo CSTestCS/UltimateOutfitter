@@ -389,3 +389,75 @@ def test_conversation_engine(lib, tmp_path):
     assert Conversation.intent_from_text("I love your outfit!") == "compliment_outfit"
     assert Conversation.intent_from_text("hello there") == "greet"
     assert ch.data["chat_log"]
+
+
+def test_animation_names_and_choice(tmp_path):
+    import random
+    from ultimate_outfitter.core.animations import AnimationLibrary, parse_name
+    lib = AnimationLibrary(tmp_path / "Animations")
+    assert (tmp_path / "Animations" / "README.md").exists()
+    for n in ["idle.fbx", "idle_happy.fbx", "idle_beach_happy.fbx", "idle_happy_2.fbx", "pose_sitting.fbx",
+              "pose_lounging.fbx", "emote_wave.fbx", "emote_wave_shy.fbx", "emote_shake_head.fbx",
+              "emote_unknownthing.fbx", "random.fbx"]:
+        (tmp_path / "Animations" / n).write_bytes(b"")
+    lib.rescan()
+    assert parse_name(tmp_path / "x" / "emote_shake_head (2).fbx").event == "shake_head"
+    assert parse_name(tmp_path / "x" / "random.fbx") is None
+    rng = random.Random(1)
+    beach = {"mood": "Happy", "setting": "Beach / pool", "activity": "Swimming / beach", "weather": "Warm"}
+    assert lib.choose_idle(beach, "cheerful", rng).path.name == "idle_beach_happy.fbx"
+    home = dict(beach, setting="Private / at home", activity="Lounging at home")
+    names = {lib.choose_idle(home, "cheerful", rng).path.name for _ in range(20)}
+    assert names <= {"idle_happy.fbx", "idle_happy_2.fbx", "pose_lounging.fbx"}
+    sad = dict(home, mood="Sad", activity="Work / office")
+    assert lib.choose_idle(sad, "edgy", rng).path.name == "idle.fbx"  # pose_sitting is manual only
+    assert lib.choose_emote("wave", home, "shy", rng).path.name == "emote_wave_shy.fbx"
+    assert lib.choose_emote("wave", home, "edgy", rng).path.name == "emote_wave.fbx"
+    assert lib.choose_emote("laugh", home, "edgy", rng) is None
+    assert [a.event for a in lib.poses()] == ["lounging", "sitting"]
+
+
+def test_expressions_config(lib, tmp_path):
+    from ultimate_outfitter.core import expressions
+    ch = _wardrobe_char(lib, tmp_path, [], build=False)
+    cfg = expressions.load(ch)
+    assert (ch.dir / "expressions.txt").exists()
+    assert expressions.weights_for(cfg, "Happy") == {"happy": 1.0}
+    assert expressions.weights_for(cfg, "cozy / tired") == {"relaxed": 0.8, "blink": 0.35}
+    (ch.dir / "expressions.txt").write_text("# c\nHappy = Fcl_ALL_Joy:0.7, happy\nSad =\n", encoding="utf-8")
+    cfg = expressions.load(ch)
+    assert expressions.weights_for(cfg, "Happy") == {"Fcl_ALL_Joy": 0.7, "happy": 1.0}
+    assert expressions.weights_for(cfg, "Sad") == {}
+
+
+def test_viewer_server(tmp_path):
+    import urllib.error
+    import urllib.request
+    from ultimate_outfitter.core.viewer_server import ViewerServer
+    (tmp_path / "Characters").mkdir()
+    (tmp_path / "Characters" / "a b.vrm").write_bytes(b"glTF")
+    (tmp_path.parent / "secret.txt").write_text("no")
+    srv = ViewerServer(tmp_path)
+    try:
+        url = srv.lib_url(tmp_path / "Characters" / "a b.vrm")
+        assert urllib.request.urlopen(url).read() == b"glTF"
+        assert b"viewer.bundle.js" in urllib.request.urlopen(srv.viewer_url()).read()
+        for bad in ("/lib/../secret.txt", "/lib/%2e%2e/secret.txt", "/other/x", "/lib/Characters"):
+            with pytest.raises(urllib.error.HTTPError):
+                urllib.request.urlopen(f"http://127.0.0.1:{srv.port}{bad}")
+    finally:
+        srv.stop()
+
+
+def test_reply_emotes_and_typed_suggestions(lib, tmp_path):
+    import random
+    from ultimate_outfitter.core.interact import Conversation
+    ch = _wardrobe_char(lib, tmp_path, [], build=False)
+    conv = Conversation(ch, "Sam", random.Random(2))
+    assert conv.respond("greet").emote == "wave"
+    assert conv.respond("goodbye").emote == "goodbye"
+    assert Conversation.parse_text("It's late, go to bed") == ("suggest_activity", {"activity": "Sleeping"})
+    assert Conversation.parse_text("let's go to the beach!")[1] == {"setting": "Beach / pool"}
+    r = conv.respond("suggest_activity", activity="Sleeping")
+    assert r.emote in ("nod", "shake_head") or r.emote.startswith(("embarrassed", "shrug", "laugh", "frustrated",
+                                                                   "proud", "tease", "shiver", "fan"))

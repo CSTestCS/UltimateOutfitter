@@ -86,7 +86,10 @@ class MainWindow(QMainWindow):
 
 
 def main(argv=None) -> int:
+    import os
     from PySide6.QtCore import QCoreApplication, Qt
+    # let the 3D viewport use WebGL on older / blocklisted GPUs, with a software fallback
+    os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--ignore-gpu-blocklist --enable-unsafe-swiftshader")
     QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     try:  # Qt WebEngine must be imported before the QApplication exists
         import PySide6.QtWebEngineWidgets  # noqa: F401

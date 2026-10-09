@@ -16,6 +16,13 @@
 <canvas id="view" tabindex="0"></canvas>
 <div id="status"></div>
 <div id="help">Left-drag: orbit · Right/middle-drag: pan · Wheel: zoom · F: frame</div>
+<script>
+  window.addEventListener('error', (e) => {
+    const s = document.getElementById('status');
+    s.textContent = '3D view error: ' + (e.message || e) + ' (your graphics driver may not support WebGL 2)';
+    s.style.display = 'block';
+  });
+</script>
 <script src="viewer.bundle.js"></script>
 </body>
 </html>
