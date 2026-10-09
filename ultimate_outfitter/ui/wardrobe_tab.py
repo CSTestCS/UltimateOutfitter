@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon, QPixmap
-from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
                                QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QMessageBox, QPushButton, QSlider, QSpinBox,
                                QSplitter, QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
@@ -55,6 +55,8 @@ class CharacterDialog(QDialog):
         self.bra = QComboBox()
         self.bra.addItems(BRA_CHOICES)
         self.bra.setCurrentText(prefs.get("wears_bra", "Yes"))
+        self.swim_sub = QCheckBox("Underwear && bras also count as swimwear")
+        self.swim_sub.setChecked(prefs.get("underwear_as_swimwear", True))
         self.acc = QSpinBox()
         self.acc.setRange(0, 8)
         self.acc.setValue(prefs.get("accessory_level", 3))
@@ -80,6 +82,7 @@ class CharacterDialog(QDialog):
         left.addWidget(b_img)
         f2 = QFormLayout()
         f2.addRow("Wears bras?", self.bra)
+        f2.addRow(self.swim_sub)
         f2.addRow("Max accessories per outfit", self.acc)
         left.addLayout(f2)
         left.addWidget(QLabel("Categories this character wears:"))
@@ -130,6 +133,7 @@ class CharacterDialog(QDialog):
         excluded = [self.excluded.item(i).text() for i in range(self.excluded.count())
                     if self.excluded.item(i).checkState() != Qt.CheckState.Checked]
         return {"wears_bra": self.bra.currentText(), "accessory_level": self.acc.value(),
+                "underwear_as_swimwear": self.swim_sub.isChecked(),
                 "excluded_categories": excluded}
 
 

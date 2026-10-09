@@ -168,6 +168,58 @@ def extract_colors(rgb: np.ndarray, k: int, mask: np.ndarray | None = None,
     return out
 
 
+def extract_exact_colors(rgb: np.ndarray, max_colors: int, mask: np.ndarray | None = None,
+                         merge_tolerance: float = 0.0, min_share: float = 0.0
+                         ) -> list[tuple[tuple[int, int, int], float]]:
+    """Extract the actual pixel colours of an image (no averaging).
+
+    Every distinct colour is counted over *all* pixels. Colours closer than
+    ``merge_tolerance`` (Delta E) to a more frequent colour are folded into it, so 0 keeps
+    every distinct colour exactly. Returns up to ``max_colors`` [(rgb, share)], most
+    frequent first. The returned values are always colours that really occur in the image.
+    """
+    flat = rgb.reshape(-1, 3)
+    if mask is not None:
+        flat = flat[mask.reshape(-1)]
+    if len(flat) == 0:
+        return []
+    packed = (flat[:, 0].astype(np.int64) << 16) | (flat[:, 1].astype(np.int64) << 8) | flat[:, 2]
+    values, counts = np.unique(packed, return_counts=True)
+    order = np.argsort(-counts, kind="stable")
+    values, counts = values[order], counts[order].astype(float)
+    total = counts.sum()
+    cols = np.stack([(values >> 16) & 255, (values >> 8) & 255, values & 255], axis=1)
+    kept: list[int] = []
+    kept_counts: list[float] = []
+    if merge_tolerance <= 0:
+        kept = list(range(min(len(cols), max_colors)))
+        kept_counts = counts[:len(kept)].tolist()
+    else:
+        # limit the work on photos with huge numbers of colours
+        limit = min(len(cols), 20000)
+        lab = rgb_to_lab(cols[:limit].astype(float))
+        kept_lab = np.zeros((0, 3))
+        for i in range(limit):
+            if len(kept_lab):
+                d = np.sqrt(((kept_lab - lab[i]) ** 2).sum(axis=1))
+                j = int(d.argmin())
+                if d[j] <= merge_tolerance:
+                    kept_counts[j] += counts[i]
+                    continue
+            if len(kept) >= max_colors:
+                continue
+            kept.append(i)
+            kept_counts.append(counts[i])
+            kept_lab = np.vstack([kept_lab, lab[i]])
+    out = []
+    for i, c in zip(kept, kept_counts):
+        share = c / total
+        if share >= min_share:
+            out.append((tuple(int(v) for v in cols[i]), float(share)))
+    out.sort(key=lambda t: -t[1])
+    return out
+
+
 def sort_by_lightness(colors: Iterable[str]) -> list[str]:
     return sorted(colors, key=lambda h: luminance(hex_to_rgb(h)))
 
@@ -194,5 +246,5 @@ def palette_match(palette_hex: Sequence[str], image_colors_lab: np.ndarray,
 def precision_to_threshold(precision: int) -> float:
     """Map a 0-100 precision slider (100 = exact) to a Delta-E threshold."""
     precision = max(0, min(100, precision))
-    # 100 -> 2 (near exact), 0 -> 45 (very loose)
-    return 2.0 + (45.0 - 2.0) * (1 - precision / 100.0) ** 1.5
+    # 100 -> 0.5 (exact match), 0 -> 45 (very loose)
+    return 0.5 + (45.0 - 0.5) * (1 - precision / 100.0) ** 1.5

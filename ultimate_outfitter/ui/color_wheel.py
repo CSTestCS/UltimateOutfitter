@@ -7,12 +7,12 @@ from pathlib import Path
 import numpy as np
 from PySide6.QtCore import QPointF, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
                                QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QMessageBox, QPushButton, QSlider, QSpinBox,
                                QVBoxLayout, QWidget)
 
-from ..core.colors import (extract_colors, hex_to_rgb, hsv_to_rgb, is_valid_hex, rgb_to_hex,
+from ..core.colors import (extract_colors, extract_exact_colors, hex_to_rgb, hsv_to_rgb, is_valid_hex, rgb_to_hex,
                            rgb_to_hsv, sort_by_lightness)
 from ..core.imaging import foreground_mask, load_rgba
 from .common import IMAGE_FILTER, array_to_pixmap
@@ -207,8 +207,26 @@ class PaletteEditorDialog(QDialog):
         btn_shades = QPushButton("Generate shades from picker…")
         btn_img = QPushButton("Extract from image…")
         self.n_colors = QSpinBox()
-        self.n_colors.setRange(1, 24)
-        self.n_colors.setValue(6)
+        self.n_colors.setRange(1, 256)
+        self.n_colors.setValue(8)
+        self.n_colors.setToolTip("How many colours to extract or generate")
+        self.extract_mode = QComboBox()
+        self.extract_mode.addItem("Exact pixel colours (precise)", "exact")
+        self.extract_mode.addItem("Dominant colours (averaged clusters)", "cluster")
+        self.extract_mode.setToolTip("Exact keeps the true HEX values found in the image; "
+                                     "dominant averages similar pixels together")
+        self.merge_tol = QDoubleSpinBox()
+        self.merge_tol.setRange(0.0, 30.0)
+        self.merge_tol.setSingleStep(0.5)
+        self.merge_tol.setValue(0.0)
+        self.merge_tol.setToolTip("Exact mode: colours closer than this (ΔE) to a more common colour are merged.\n"
+                                  "0 = every distinct colour is kept exactly.")
+        self.ignore_bg = QCheckBox("Ignore background")
+        self.ignore_bg.setToolTip("Skip the border/background colour of an image (transparent pixels are always skipped)")
+        btn_reextract = QPushButton("Re-extract")
+        btn_reextract.clicked.connect(lambda: self.source_image and self.extract_from(self.source_image))
+        self.extract_mode.currentIndexChanged.connect(
+            lambda *_: self.merge_tol.setEnabled(self.extract_mode.currentData() == "exact"))
         btn_add.clicked.connect(lambda: self._add(self.picker.color()))
         btn_set.clicked.connect(self._replace)
         btn_del.clicked.connect(lambda: [self.list.takeItem(self.list.row(i)) for i in self.list.selectedItems()])
@@ -236,6 +254,13 @@ class PaletteEditorDialog(QDialog):
         row2.addWidget(QLabel("Count:"))
         row2.addWidget(self.n_colors)
         right.addLayout(row2)
+        row3 = QHBoxLayout()
+        row3.addWidget(self.extract_mode, 1)
+        row3.addWidget(QLabel("Merge ΔE:"))
+        row3.addWidget(self.merge_tol)
+        row3.addWidget(self.ignore_bg)
+        row3.addWidget(btn_reextract)
+        right.addLayout(row3)
         right.addWidget(self.preview_img)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self._accept)
@@ -292,9 +317,12 @@ class PaletteEditorDialog(QDialog):
     def extract_from(self, path: str):
         img = load_rgba(path)
         mask = img[..., 3] > 16
-        if mask.mean() > 0.99:
-            mask = foreground_mask(img) if self.n_colors.value() < 12 else mask
-        cols = extract_colors(img[..., :3], self.n_colors.value(), mask, min_share=0.002)
+        if self.ignore_bg.isChecked():
+            mask &= foreground_mask(img, tolerance=0.5 if self.extract_mode.currentData() == "exact" else 12)
+        if self.extract_mode.currentData() == "exact":
+            cols = extract_exact_colors(img[..., :3], self.n_colors.value(), mask, self.merge_tol.value())
+        else:
+            cols = extract_colors(img[..., :3], self.n_colors.value(), mask)
         self.list.clear()
         for rgb, _share in cols:
             self._add(rgb_to_hex(rgb))

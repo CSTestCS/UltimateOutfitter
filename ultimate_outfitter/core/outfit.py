@@ -51,6 +51,11 @@ ACTIVITY_TRAITS = {
     "Sleeping": "cozy",
 }
 
+SETTINGS = ["Public", "Private / at home", "Beach / pool"]
+
+# Slots that may be filled by pieces from another slot: underwear and bras can be worn as swimwear.
+SLOT_SUBSTITUTES = {"swim_bottom": ["underwear_bottom"], "swim_top": ["bra"]}
+
 REJECT_REASONS = {
     "clash": "Clashing colours",
     "unnecessary": "Not necessary (e.g. a skirt over a dress)",
@@ -78,6 +83,11 @@ class DayContext:
     weather: str
     formality: float | None = None   # None -> derived from activity
     notes: str = ""
+    setting: str = "Public"
+    underwear_only: bool = False     # only honoured in private or beach / pool settings
+
+    def is_underwear_only(self) -> bool:
+        return self.underwear_only and self.setting != "Public"
 
     def target_formality(self) -> float:
         return self.formality if self.formality is not None else ACTIVITY_FORMALITY.get(self.activity, 1)
@@ -87,7 +97,8 @@ class DayContext:
 
     def to_dict(self) -> dict[str, Any]:
         return {"activity": self.activity, "mood": self.mood, "weather": self.weather,
-                "formality": self.formality, "notes": self.notes}
+                "formality": self.formality, "notes": self.notes, "setting": self.setting,
+                "underwear_only": self.is_underwear_only()}
 
 
 class NoOutfitPossible(Exception):
@@ -123,7 +134,16 @@ class OutfitSession:
         return [self.wardrobe[e] for e in self.character.data["dresser"] if e in self.wardrobe]
 
     def owned_slots(self) -> set[str]:
-        return {e["slot"] for e in self.wardrobe.values()}
+        owned = {e["slot"] for e in self.wardrobe.values()}
+        return owned | {s for s in SLOT_SUBSTITUTES if any(self.slot_accepts(s, o) for o in owned)}
+
+    def slot_accepts(self, slot: str, entry_slot: str) -> bool:
+        """Whether a piece made for ``entry_slot`` may be worn in ``slot``."""
+        if entry_slot == slot:
+            return True
+        if entry_slot in SLOT_SUBSTITUTES.get(slot, []):
+            return self.character.data.get("prefs", {}).get("underwear_as_swimwear", True)
+        return False
 
     def in_use(self) -> set[str]:
         return {e for ids in self.proposal.values() for e in ids}
@@ -179,6 +199,8 @@ class OutfitSession:
         s += 6 * shared * w["clash"]
         avoid = self.slot_avoid_palettes.get(slot, set())
         s -= 40 * len(avoid & set(entry["palettes"])) * w["clash"]
+        if entry["slot"] != slot:
+            s -= 8  # real swimwear is preferred over underwear standing in for it
         rng = random.Random(f"{self.seed}-{entry['id']}")
         s += rng.uniform(0, 6)
         return s
@@ -189,7 +211,7 @@ class OutfitSession:
         bad_cats = self.slot_excluded_categories.get(slot, set())
         out = []
         for e in self.dresser_entries():
-            if e["slot"] != slot or e["id"] in used or e["id"] in self.excluded_entries:
+            if not self.slot_accepts(slot, e["slot"]) or e["id"] in used or e["id"] in self.excluded_entries:
                 continue
             if e["item_id"] in self.excluded_items or e["item_id"] in used_items:
                 continue
@@ -209,6 +231,18 @@ class OutfitSession:
         need = ctx.needed_warmth()
         required: list[str] = []
         optional: list[str] = []
+        wears_bra = prefs.get("wears_bra", "Yes")
+        if ctx.is_underwear_only():
+            required = ["underwear_bottom"]
+            if wears_bra == "Yes":
+                required.append("bra")
+            elif wears_bra == "Sometimes":
+                optional.append("bra")
+            if ctx.setting == "Beach / pool":
+                optional += ["footwear", "head", "eyes", "jewelry", "hair"]
+            else:
+                optional += ["socks", "jewelry", "hair"]
+            return required, optional, []
         if ctx.activity == "Sleeping":
             required = ["underwear_bottom"]
             core = [["sleepwear"], ["base_top", "legs"], ["full_body"]]
@@ -218,7 +252,6 @@ class OutfitSession:
             optional = ["footwear", "head", "eyes", "jewelry", "hair", "bag"]
             return required, optional, core
         required.append("underwear_bottom")
-        wears_bra = prefs.get("wears_bra", "Yes")
         if wears_bra == "Yes":
             required.append("bra")
         elif wears_bra == "Sometimes":
@@ -265,7 +298,7 @@ class OutfitSession:
         laundry_helps = False
 
         def available(slot):
-            return any(e["slot"] == slot for e in self.dresser_entries())
+            return any(self.slot_accepts(slot, e["slot"]) for e in self.dresser_entries())
 
         # core garments: choose the alternative group with the best average top score
         best_group, best_score = None, -1e9
@@ -275,11 +308,12 @@ class OutfitSession:
             score = sum(self.candidates(s)[0][0] for s in group if self.candidates(s)) / len(group)
             if score > best_score:
                 best_group, best_score = group, score
-        if best_group is None:
+        core_missing = bool(core_groups) and best_group is None
+        if core_missing:
             owned_group = any(all(s in owned for s in g) for g in core_groups)
             missing.append(" / ".join("+".join(SLOTS[s] for s in g) for g in core_groups))
             laundry_helps = laundry_helps or owned_group
-        else:
+        elif best_group:
             for s in best_group:
                 self._fill_slot(s)
 
@@ -292,7 +326,7 @@ class OutfitSession:
                     laundry_helps = True
                 else:
                     self.warnings.append(f"{self.character.name} owns no {SLOTS[slot].lower()} items.")
-        if missing and (laundry_helps or best_group is None):
+        if missing and (laundry_helps or core_missing):
             raise NoOutfitPossible(missing, laundry_helps)
 
         acc_level = self.character.data.get("prefs", {}).get("accessory_level", 3)

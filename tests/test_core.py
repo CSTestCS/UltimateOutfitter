@@ -188,3 +188,59 @@ def test_upscale_keeps_thin_diagonal_lines():
         # every point along the diagonal stays light
         diag = np.array([out[4 * i + 2, 4 * i + 2, 0] for i in range(1, 15)])
         assert (diag > 128).all(), m
+
+
+def _wardrobe_char(lib, tmp_path, cats, prefs=None):
+    lib.add_palette("Ruby", ["#7A0010", "#C8102E", "#F28B9B"])
+    for cat in cats:
+        src = _garment(tmp_path / f"{cat.replace('/', '_')}.png")
+        ans = _first_answers(cat)
+        t, a = categories.evaluate_answers(cat, ans)
+        lib.add_item(src, cat, cat, ans, t, a)
+    img = np.full((40, 40, 4), 255, np.uint8)
+    img[5:35, 5:35, :3] = colors.hex_to_rgb("#C8102E")
+    img[10:20, 10:20, :3] = colors.hex_to_rgb("#7A0010")
+    img[22:30, 10:20, :3] = colors.hex_to_rgb("#F28B9B")
+    Image.fromarray(img, "RGBA").save(tmp_path / "c.png")
+    answers = {q.id: ([q.options[0].label] if q.multi else q.options[0].label) for q in CHARACTER_QUESTIONS}
+    ch = Character.create(lib, "Mia", tmp_path / "c.png", answers, prefs or {"wears_bra": "Yes"})
+    assert ch.scan_palettes(100, 1.0)  # exact colours match at maximum precision
+    ch.data["gen_settings"]["min_score"] = 0
+    ch.build_wardrobe()
+    return ch
+
+
+def test_exact_color_extraction():
+    img = np.zeros((10, 10, 3), np.uint8)
+    img[:5] = (200, 16, 46)
+    img[5:8] = (201, 16, 46)
+    img[8:] = (11, 26, 64)
+    exact = colors.extract_exact_colors(img, 8)
+    assert [colors.rgb_to_hex(c) for c, _ in exact] == ["#C8102E", "#C9102E", "#0B1A40"]
+    merged = colors.extract_exact_colors(img, 8, merge_tolerance=2)
+    assert [colors.rgb_to_hex(c) for c, _ in merged] == ["#C8102E", "#0B1A40"]
+    assert merged[0][1] == pytest.approx(0.8)
+    assert colors.precision_to_threshold(100) <= 0.5
+
+
+def test_underwear_only_outfit(lib, tmp_path):
+    ch = _wardrobe_char(lib, tmp_path, ["Underwear Bottoms", "Bras", "Shirts", "Pants", "Shoes", "Jewelry"])
+    for setting in ("Private / at home", "Beach / pool"):
+        s = OutfitSession(ch, DayContext("Lounging at home", "Calm", "Warm", setting=setting, underwear_only=True))
+        proposal = s.build()
+        assert {"underwear_bottom", "bra"} <= set(proposal)
+        assert not {"base_top", "legs", "full_body"} & set(proposal)
+    # ignored in public
+    s = OutfitSession(ch, DayContext("Casual / errands", "Calm", "Warm", setting="Public", underwear_only=True))
+    assert "base_top" in s.build() or "full_body" in s.proposal
+
+
+def test_underwear_counts_as_swimwear(lib, tmp_path):
+    ch = _wardrobe_char(lib, tmp_path, ["Underwear Bottoms", "Bras", "Sandals"])
+    s = OutfitSession(ch, DayContext("Swimming / beach", "Happy", "Scorching hot"))
+    proposal = s.build()
+    slots = {ch.data["wardrobe"][e]["category"]: sl for sl, ids in proposal.items() for e in ids}
+    assert slots["Underwear Bottoms"] == "swim_bottom" and slots["Bras"] == "swim_top"
+    ch.data["prefs"]["underwear_as_swimwear"] = False
+    with pytest.raises(NoOutfitPossible):
+        OutfitSession(ch, DayContext("Swimming / beach", "Happy", "Scorching hot")).build()

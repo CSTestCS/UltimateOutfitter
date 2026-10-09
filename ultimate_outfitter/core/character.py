@@ -11,7 +11,7 @@ from typing import Any, Callable
 import numpy as np
 
 from .categories import CATEGORY_BY_NAME, CATEGORY_NAMES, O, Q, Question
-from .colors import extract_colors, hex_to_rgb, palette_match, precision_to_threshold, rgb_to_hex, rgb_to_lab
+from .colors import extract_colors, extract_exact_colors, hex_to_rgb, palette_match, precision_to_threshold, rgb_to_hex, rgb_to_lab
 from .imaging import foreground_mask, load_rgba, recolor_regions, save_rgba
 from .storage import Library, new_id, safe_name, unique_path, write_json_atomic
 from .traits import add_into, cosine, normalize
@@ -239,13 +239,18 @@ class Character:
             scan["precision"] = int(precision)
         if min_coverage is not None:
             scan["min_coverage"] = float(min_coverage)
-        if not scan.get("image_colors") or scan.get("n_colors") != n_colors:
+        if (not scan.get("image_colors") or scan.get("n_colors") != n_colors
+                or "exact_colors" not in scan):
             img = load_rgba(self.image_path)
             mask = foreground_mask(img)
             colors = extract_colors(img[..., :3], n_colors, mask, min_share=0.004)
             scan["image_colors"] = [[rgb_to_hex(c), s] for c, s in colors]
+            # the true pixel colours too, so exact palettes can match at the highest precision
+            exact = extract_exact_colors(img[..., :3], 256, mask, merge_tolerance=0.5, min_share=0.0005)
+            scan["exact_colors"] = [rgb_to_hex(c) for c, _ in exact]
             scan["n_colors"] = n_colors
-        lab = rgb_to_lab(np.array([hex_to_rgb(h) for h, _ in scan["image_colors"]], dtype=float))
+        hexes = [h for h, _ in scan["image_colors"]] + scan.get("exact_colors", [])
+        lab = rgb_to_lab(np.array([hex_to_rgb(h) for h in hexes], dtype=float))
         threshold = precision_to_threshold(scan["precision"])
         matches = []
         for pal in self.library.palettes.values():

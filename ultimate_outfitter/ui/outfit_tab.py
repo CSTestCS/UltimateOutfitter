@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QButtonGroup, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
+from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
                                QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                                QListWidget, QMessageBox, QPushButton, QRadioButton, QScrollArea,
                                QSplitter, QTabWidget, QVBoxLayout, QWidget)
 
 from ..core.categories import ACTIVITIES, SLOTS, WEATHER
 from ..core.character import Character, list_characters
-from ..core.outfit import MOODS, REJECT_REASONS, DayContext, NoOutfitPossible, OutfitSession, do_laundry
+from ..core.outfit import MOODS, REJECT_REASONS, SETTINGS, DayContext, NoOutfitPossible, OutfitSession, do_laundry
 from .common import AppState, Gallery, thumb_cache
 
 
@@ -28,15 +28,28 @@ class DayDialog(QDialog):
         self.formality.addItem("Automatic (from activity)", None)
         for i, label in enumerate(["Very casual", "Casual", "Smart casual", "Formal", "Ceremonial"]):
             self.formality.addItem(label, float(i))
+        self.setting = QComboBox()
+        self.setting.addItems(SETTINGS)
+        self.underwear_only = QCheckBox("Limit the outfit to underwear only")
+        self.underwear_only.setToolTip("Available in private or beach / pool settings. Underwear and bras "
+                                       "can also stand in for swimwear.")
+        self.setting.currentTextChanged.connect(
+            lambda t: (self.underwear_only.setEnabled(t != "Public"),
+                       t == "Public" and self.underwear_only.setChecked(False)))
         self.notes = QLineEdit()
-        for combo, key in ((self.activity, "activity"), (self.mood, "mood"), (self.weather, "weather")):
+        for combo, key in ((self.activity, "activity"), (self.mood, "mood"), (self.weather, "weather"),
+                           (self.setting, "setting")):
             if last.get(key):
                 combo.setCurrentText(last[key])
+        self.underwear_only.setEnabled(self.setting.currentText() != "Public")
+        self.underwear_only.setChecked(bool(last.get("underwear_only")) and self.underwear_only.isEnabled())
         f = QFormLayout(self)
         f.addRow(QLabel(f"<b>What is {name} doing today?</b>"))
         f.addRow("Main activity", self.activity)
         f.addRow("Mood", self.mood)
         f.addRow("Weather", self.weather)
+        f.addRow("Setting", self.setting)
+        f.addRow("", self.underwear_only)
         f.addRow("Dress code", self.formality)
         f.addRow("Notes", self.notes)
         b = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
@@ -46,7 +59,8 @@ class DayDialog(QDialog):
 
     def context(self) -> DayContext:
         return DayContext(self.activity.currentText(), self.mood.currentText(), self.weather.currentText(),
-                          self.formality.currentData(), self.notes.text())
+                          self.formality.currentData(), self.notes.text(), self.setting.currentText(),
+                          self.underwear_only.isChecked())
 
 
 class RejectDialog(QDialog):
@@ -295,6 +309,7 @@ class OutfitTab(QWidget):
             return
         c = s.context
         txt = f"<b>{s.character.name}</b> — {c.activity}, feeling {c.mood.lower()}, weather: {c.weather.lower()}."
+        txt += f" Setting: {c.setting.lower()}" + (" — underwear only." if c.is_underwear_only() else ".")
         if s.warnings:
             txt += "<br><i>" + "<br>".join(s.warnings) + "</i>"
         n_pending = len(s.pending())

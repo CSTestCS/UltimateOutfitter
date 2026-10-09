@@ -51,8 +51,12 @@ The app never overwrites files it creates automatically. If a name is taken, it 
     (ears, tails, wings).
   * **Copy from an existing item:** select an item and click *Copy selected as new item…*. You can also use the
     *copy answers from an existing item* drop-down in the dialog. All answers are pre-filled, so you only change what differs.
-* **Palettes:** *Upload palette image(s)…* extracts the dominant colours (you choose how many) and lets you edit them
-  before saving. *New from colour wheel…* opens an HSV wheel with H/S/V, R/G/B and HEX inputs. Palettes can be
+* **Palettes:** *Upload palette image(s)…* extracts colours from the image and lets you edit them before saving.
+  * **Exact pixel colours (precise)**, the default, keeps the true HEX values found in the image. Nothing is averaged.
+    *Merge ΔE* folds near-identical colours into the more common one. At 0, every distinct colour is kept, up to 256.
+  * **Dominant colours** averages similar pixels into clusters instead.
+  * *Ignore background* skips the image's background colour. Transparent pixels are always skipped, and *Re-extract*
+    re-runs the extraction with new settings. *New from colour wheel…* opens an HSV wheel with H/S/V, R/G/B and HEX inputs. Palettes can be
   *varied hues* or *shades of one colour*, and *Generate shades* builds a shade ramp whose hue drifts slightly.
 * **Patterns:** upload any image to use as a pattern in the editor.
 
@@ -71,9 +75,11 @@ The app never overwrites files it creates automatically. If a name is taken, it 
 ## C. Character wardrobe creator
 
 1. Click *New character…*, choose the character image, answer the personality questions and set preferences
-   (whether they wear bras, which categories they wear, and the maximum number of accessories).
+   (whether they wear bras, whether underwear and bras also count as swimwear, which categories they wear, and the
+   maximum number of accessories).
 2. **Palette scan:** the app samples the character's colours and finds every saved palette whose colours appear in
-   the character. *Precision* ranges from loose (similar colours) to exact (precise matches). *Min. palette coverage*
+   the character. *Precision* ranges from loose (similar colours) to exact: at 100 a palette colour must match a
+   real pixel colour within ΔE 0.5. The scan checks both the character's averaged colours and its exact pixel colours. *Min. palette coverage*
    sets how many of a palette's colours must be found. You can untick a matched palette to leave it out.
 3. **Build wardrobe:** every item is rated against the character's personality, and items are ranked best to worst
    within each category. The best items get the most recolours:
@@ -90,7 +96,12 @@ Profiles are saved automatically and reopen with the app. *Open profile file…*
 
 ## D. Outfit manager
 
-* Click *Plan today's outfit…* and answer the questions: activity, mood, weather and dress code. The app picks a complete
+* Click *Plan today's outfit…* and answer the questions: activity, mood, weather, setting (public, private / at
+  home, or beach / pool) and dress code. In a private or beach / pool setting you can tick *Limit the outfit to
+  underwear only*. The outfit is then just underwear (plus a bra if the character wears one), with a few optional
+  extras such as jewellery, socks at home, or sandals and sunglasses at the beach.
+* Underwear can be picked as a swimsuit bottom and a bra as a swimsuit top, unless that is switched off in the
+  character profile. Real swimwear is still preferred when it is available. The app picks a complete
   outfit from the **dresser**: underwear, a top with bottoms or a full-body garment, footwear, layers as the weather
   needs, and accessories. It scores each piece on personality match, activity, formality, warmth, mood and colour harmony
   with the other pieces.
