@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon, QPixmap
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
+from PySide6.QtWidgets import (QScrollArea, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
                                QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QMessageBox, QPushButton, QSlider, QSpinBox,
                                QSplitter, QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
@@ -39,7 +39,7 @@ class CharacterDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Edit character" if character else "New character")
         self.resize(1050, 780)
-        self.image_path: str | None = None
+        self.image_paths: list[str] = []
         data = character.data if character else {}
         prefs = data.get("prefs", {})
         self.name = QLineEdit(data.get("name", ""))
@@ -47,9 +47,11 @@ class CharacterDialog(QDialog):
         self.img_label = QLabel("No image")
         self.img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.img_label.setMinimumSize(240, 240)
-        b_img = QPushButton("Choose character image…")
+        b_img = QPushButton("Choose character image(s)…")
+        b_img.setToolTip("Several images (outfits, angles, art styles) can be used; the palette scan uses all of them.")
         b_img.clicked.connect(self._choose)
         b_img.setVisible(character is None)
+        self.img_count = QLabel("")
         if character:
             self.img_label.setPixmap(thumb_cache.get(character.image_path, 240))
         self.bra = QComboBox()
@@ -80,6 +82,7 @@ class CharacterDialog(QDialog):
         left.addLayout(f)
         left.addWidget(self.img_label)
         left.addWidget(b_img)
+        left.addWidget(self.img_count)
         f2 = QFormLayout()
         f2.addRow("Wears bras?", self.bra)
         f2.addRow(self.swim_sub)
@@ -104,9 +107,11 @@ class CharacterDialog(QDialog):
         self._update()
 
     def _choose(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Character image", "", IMAGE_FILTER)
-        if path:
-            self.image_path = path
+        paths, _ = QFileDialog.getOpenFileNames(self, "Character image(s)", "", IMAGE_FILTER)
+        if paths:
+            self.image_paths = paths
+            path = paths[0]
+            self.img_count.setText(f"{len(paths)} image(s) selected" if len(paths) > 1 else "")
             pm = QPixmap(path)
             self.img_label.setPixmap(pm.scaled(240, 240, Qt.AspectRatioMode.KeepAspectRatio,
                                                Qt.TransformationMode.SmoothTransformation))
@@ -121,7 +126,7 @@ class CharacterDialog(QDialog):
         if not self.name.text().strip():
             QMessageBox.warning(self, "Character", "Please enter a name.")
             return
-        if not self.name.isReadOnly() and not self.image_path:
+        if not self.name.isReadOnly() and not self.image_paths:
             QMessageBox.warning(self, "Character", "Please choose a character image.")
             return
         if self.form.unanswered() and QMessageBox.question(
@@ -170,7 +175,14 @@ class WardrobeTab(QWidget):
         b_folder = QPushButton("Open character folder")
         b_folder.clicked.connect(lambda: self.character and open_folder(self.character.dir))
         hb = QVBoxLayout()
+        b_img_add = QPushButton("Add reference image…")
+        b_img_add.setToolTip("More images of this character to base colour palettes on")
+        b_img_add.clicked.connect(self.add_reference_image)
+        b_img_rem = QPushButton("Remove a reference image…")
+        b_img_rem.clicked.connect(self.remove_reference_image)
         hb.addWidget(b_edit)
+        hb.addWidget(b_img_add)
+        hb.addWidget(b_img_rem)
         hb.addWidget(b_folder)
         hb.addStretch(1)
         header = QHBoxLayout()
@@ -220,20 +232,62 @@ class WardrobeTab(QWidget):
         self.min_score.setValue(35)
         self.max_items = QSpinBox()
         self.max_items.setRange(1, 200)
-        self.max_items.setValue(12)
+        self.max_items.setValue(6)
+        self.max_items.setToolTip("How many different base items of one category may be owned")
+        self.size = QComboBox()
+        for label, v in (("Minimalist (×0.4)", 0.4), ("Small (×0.7)", 0.7), ("Average (×1)", 1.0),
+                         ("Large (×1.6)", 1.6), ("Fashionista (×2.5)", 2.5), ("Hoarder (×4)", 4.0)):
+            self.size.addItem(label, v)
+        self.size.setToolTip("Scales how many pieces per slot a realistic wardrobe gets "
+                             "(average: ~10 tops, 7 bottoms, 4 pairs of shoes...)")
+        self.max_colourways = QSpinBox()
+        self.max_colourways.setRange(1, 20)
+        self.max_colourways.setToolTip("The most versions (colours / prints) of a single item; only great "
+                                       "matches reach the maximum")
+        self.multi_chance = self._pct("Chance a piece mixes two palettes")
+        self.triple_chance = self._pct("Chance a piece mixes three palettes")
+        self.pattern_chance = self._pct("Chance a piece gets a print (when a suitable pattern exists)")
+        self.fav_bias = self._pct("0% = every matched palette equally likely, 100% = mostly the best matches")
+        self.rating_bias = self._pct("0% = every suitable item equally likely, 100% = mostly the best matches")
+        self.exhaustive = QCheckBox("Exhaustive: every item in every palette (not realistic)")
+        self.seed_label = QLabel()
+        b_seed = QPushButton("New random seed")
+        b_seed.setToolTip("Builds use a stored random seed; change it for a different selection")
+        b_seed.clicked.connect(self._new_seed)
+        self.patterns_list = QListWidget()
+        self.patterns_list.setMaximumHeight(90)
+        self.patterns_list.setToolTip("Untick patterns this character should never wear")
         gf = QFormLayout()
         gf.addRow("Minimum personality match", self.min_score)
+        gf.addRow("Wardrobe size", self.size)
         gf.addRow("Max items per category", self.max_items)
+        gf.addRow("Max versions per item", self.max_colourways)
+        gf.addRow("Two-palette pieces", self.multi_chance)
+        gf.addRow("Three-palette pieces", self.triple_chance)
+        gf.addRow("Printed pieces", self.pattern_chance)
+        gf.addRow("Favourite-palette bias", self.fav_bias)
+        gf.addRow("Best-match item bias", self.rating_bias)
+        seed_row = QHBoxLayout()
+        seed_row.addWidget(self.seed_label, 1)
+        seed_row.addWidget(b_seed)
+        gf.addRow("Random seed", seed_row)
+        gf.addRow(self.exhaustive)
+        gf.addRow("Allowed patterns", self.patterns_list)
         gl.addLayout(gf)
         b_build = QPushButton("Build / update wardrobe (all items)")
         b_build.clicked.connect(lambda: self.build(new_only=False))
         self.b_new = QPushButton("Scan for new clothing items")
         self.b_new.clicked.connect(lambda: self.build(new_only=True))
+        b_clear = QPushButton("Clear wardrobe…")
+        b_clear.setToolTip("Delete every generated piece so the wardrobe can be rebuilt from scratch")
+        b_clear.clicked.connect(self.clear_wardrobe)
         gl.addWidget(b_build)
         gl.addWidget(self.b_new)
+        gl.addWidget(b_clear)
         self.ratings = QTreeWidget()
         self.ratings.setHeaderLabels(["Category / item", "Match"])
         self.ratings.setColumnWidth(0, 230)
+        self.ratings.setMinimumHeight(160)
         gl.addWidget(QLabel("Item ratings for this character (best first):"))
         gl.addWidget(self.ratings, 1)
 
@@ -264,7 +318,10 @@ class WardrobeTab(QWidget):
         sh.addWidget(scan_box, 1)
         sh.addWidget(gen_box, 1)
         self.tabs = QTabWidget()
-        self.tabs.addTab(setup, "Scan && build")
+        setup_scroll = QScrollArea()
+        setup_scroll.setWidgetResizable(True)
+        setup_scroll.setWidget(setup)
+        self.tabs.addTab(setup_scroll, "Scan && build")
         self.tabs.addTab(gal, "Wardrobe")
 
         rv = QVBoxLayout()
@@ -336,6 +393,7 @@ class WardrobeTab(QWidget):
             f"<b>Wears bras:</b> {prefs.get('wears_bra', 'Yes')} &nbsp; "
             f"<b>Accessories:</b> up to {prefs.get('accessory_level', 3)}<br>"
             f"<b>Excluded categories:</b> {', '.join(excl) if excl else 'none'}<br>"
+            f"<b>Reference images:</b> {len(ch.data.get('images', [1]))}<br>"
             f"<b>Wardrobe:</b> {len(ch.data['wardrobe'])} pieces "
             f"({len(ch.data['dresser'])} in dresser, {len(ch.data['hamper'])} in hamper)")
         scan = ch.data["palette_scan"]
@@ -348,7 +406,24 @@ class WardrobeTab(QWidget):
         self._precision_text(self.precision.value())
         gs = ch.data.get("gen_settings", {})
         self.min_score.setValue(gs.get("min_score", 35))
-        self.max_items.setValue(gs.get("max_items_per_category", 12))
+        self.max_items.setValue(gs.get("max_items_per_category", 6))
+        idx = min(range(self.size.count()), key=lambda i: abs(self.size.itemData(i) - gs.get("wardrobe_size", 1.0)))
+        self.size.setCurrentIndex(idx)
+        self.max_colourways.setValue(gs.get("max_colourways", 3))
+        for w, key in ((self.multi_chance, "multi_palette_chance"), (self.triple_chance, "triple_palette_chance"),
+                       (self.pattern_chance, "pattern_chance"), (self.fav_bias, "favourite_bias"),
+                       (self.rating_bias, "rating_bias")):
+            w.setValue(int(round(gs.get(key, 0) * 100)))
+        self.exhaustive.setChecked(gs.get("exhaustive", False))
+        self.seed_label.setText(str(gs.get("seed", 1)))
+        excluded = set(gs.get("excluded_patterns", []))
+        self.patterns_list.clear()
+        for pat in sorted(self.state.library.patterns.values(), key=lambda p: p["name"].lower()):
+            it = QListWidgetItem(QIcon(thumb_cache.get(self.state.library.abspath(pat["image"]), 24)), pat["name"])
+            it.setData(Qt.ItemDataRole.UserRole, pat["id"])
+            it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            it.setCheckState(Qt.CheckState.Unchecked if pat["id"] in excluded else Qt.CheckState.Checked)
+            self.patterns_list.addItem(it)
         self.image_colors.set_colors([c for c, _ in scan.get("image_colors", [])])
         self._fill_matches()
         n_new = len(ch.new_item_ids())
@@ -407,7 +482,7 @@ class WardrobeTab(QWidget):
         dlg = CharacterDialog(self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        ch = Character.create(self.state.library, dlg.name.text().strip(), dlg.image_path,
+        ch = Character.create(self.state.library, dlg.name.text().strip(), dlg.image_paths,
                               dlg.form.answers(), dlg.prefs())
         self.character = ch
         self.refresh_characters(ch.dir)
@@ -440,9 +515,74 @@ class WardrobeTab(QWidget):
     # ------------------------------------------------------------- scan / build
     def _save_settings(self):
         ch = self.character
-        ch.data["gen_settings"]["min_score"] = self.min_score.value()
-        ch.data["gen_settings"]["max_items_per_category"] = self.max_items.value()
+        gs = ch.data["gen_settings"]
+        gs["min_score"] = self.min_score.value()
+        gs["max_items_per_category"] = self.max_items.value()
+        gs["wardrobe_size"] = self.size.currentData()
+        gs["max_colourways"] = self.max_colourways.value()
+        gs["multi_palette_chance"] = self.multi_chance.value() / 100
+        gs["triple_palette_chance"] = self.triple_chance.value() / 100
+        gs["pattern_chance"] = self.pattern_chance.value() / 100
+        gs["favourite_bias"] = self.fav_bias.value() / 100
+        gs["rating_bias"] = self.rating_bias.value() / 100
+        gs["exhaustive"] = self.exhaustive.isChecked()
+        gs["excluded_patterns"] = [self.patterns_list.item(i).data(Qt.ItemDataRole.UserRole)
+                                   for i in range(self.patterns_list.count())
+                                   if self.patterns_list.item(i).checkState() != Qt.CheckState.Checked]
         ch.save()
+
+    def _pct(self, tip: str) -> QSpinBox:
+        sp = QSpinBox()
+        sp.setRange(0, 100)
+        sp.setSuffix(" %")
+        sp.setToolTip(tip)
+        return sp
+
+    def _new_seed(self):
+        if self.character:
+            import random
+            self.character.data["gen_settings"]["seed"] = random.randrange(1, 1 << 30)
+            self.character.save()
+            self.seed_label.setText(str(self.character.data["gen_settings"]["seed"]))
+
+    def add_reference_image(self):
+        ch = self.character
+        if not ch:
+            return
+        paths, _ = QFileDialog.getOpenFileNames(self, f"More images of {ch.name}", "", IMAGE_FILTER)
+        for p in paths:
+            ch.add_image(p)
+        if paths:
+            self._show_character()
+            if self.state.library.palettes:
+                self.scan()
+
+    def remove_reference_image(self):
+        ch = self.character
+        if not ch or len(ch.data["images"]) < 2:
+            QMessageBox.information(self, "Reference images", "A character needs at least one image.")
+            return
+        from PySide6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getItem(self, "Remove reference image", "Image to stop using:",
+                                        ch.data["images"], 0, False)
+        if ok and name:
+            ch.remove_image(name)
+            self._show_character()
+
+    def clear_wardrobe(self):
+        ch = self.character
+        if not ch or not ch.data["wardrobe"]:
+            return
+        r = QMessageBox.question(self, "Clear wardrobe", f"Delete all {len(ch.data['wardrobe'])} generated pieces "
+                                 f"of {ch.name} (and their image files)?\nOutfit history is kept.")
+        if r == QMessageBox.StandardButton.Yes:
+            for eid in list(ch.data["wardrobe"]):
+                ch.remove_entry(eid, delete_file=True)
+            ch.data["processed_items"] = []
+            ch.data.pop("current_outfit", None)
+            ch.save()
+            self._show_character()
+            self.state.characters_changed.emit()
 
     def scan(self):
         ch = self.character
@@ -481,8 +621,14 @@ class WardrobeTab(QWidget):
                 ch.save()
             self._show_character()
             return
-        if QMessageBox.question(self, "Build wardrobe", f"Create {len(plan)} recoloured images in\n"
-                                f"{ch.wardrobe_dir}?") != QMessageBox.StandardButton.Yes:
+        summary = ch.plan_summary(plan)
+        multi = sum(len(p["palettes"]) > 1 for p in plan)
+        printed = sum(p["pattern"] is not None for p in plan)
+        lines = "\n".join(f"  {cat}: {n}" for cat, n in sorted(summary.items()))
+        if QMessageBox.question(self, "Build wardrobe",
+                                f"Create {len(plan)} pieces ({multi} mixing palettes, {printed} with a print):\n\n"
+                                f"{lines}\n\nin {ch.wardrobe_dir}?\n\n(Change the settings or the random seed "
+                                "for a different selection.)") != QMessageBox.StandardButton.Yes:
             return
 
         def done(created):
@@ -492,7 +638,7 @@ class WardrobeTab(QWidget):
             QMessageBox.information(self, "Wardrobe", f"Added {len(created)} pieces to {ch.name}'s "
                                     "wardrobe and dresser.")
         run_with_progress(self, f"Building {ch.name}'s wardrobe", ch.build_wardrobe, ids,
-                          on_done=done, pass_progress=True)
+                          on_done=done, pass_progress=True, plan=plan)
 
     # ------------------------------------------------------------------ gallery
     def refresh_gallery(self):
@@ -507,9 +653,12 @@ class WardrobeTab(QWidget):
             if cat != "All categories" and e["category"] != cat:
                 continue
             where = "hamper" if e["id"] in ch.data["hamper"] else "dresser"
-            self.gallery.add(e["id"], f"{e['item_name']}\n{'+'.join(e['palette_names'])}",
+            print_ = f" ({e['pattern_name']})" if e.get("pattern_name") else ""
+            n_files = len(e.get("files") or [e["file"]])
+            self.gallery.add(e["id"], f"{e['item_name']}\n{'+'.join(e['palette_names'])}{print_}",
                              ch.entry_path(e), tooltip=f"{e['category']} — match {e['rating']:.0f}\n"
-                                                       f"in {where}\n{e['file']}")
+                                                       f"in {where}\n{e['file']}"
+                                                       + (f"\n+{n_files - 1} more image(s)" if n_files > 1 else ""))
             shown += 1
         self.count_label.setText(f"{shown} pieces")
 

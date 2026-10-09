@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBo
                                QVBoxLayout, QWidget)
 
 from ..core import imaging
+from ..core.patterns import load_pattern
 from ..core.storage import unique_path
 from .common import IMAGE_FILTER, AppState, SwatchRow, array_to_pixmap, busy, checker_pixmap, palette_pixmap
 
@@ -240,6 +241,10 @@ class EditorTab(QWidget):
         self.pat_aa.setChecked(True)
         self.pat_tiled = QCheckBox("Tile")
         self.pat_tiled.setChecked(True)
+        self.pat_cutaway = QCheckBox("Apply the pattern's cutaway mask")
+        self.pat_cutaway.setChecked(True)
+        self.pat_cutaway.setToolTip("If the pattern has a cutaway (set in the Library), cut holes in the "
+                                    "selection where the mask is dark / transparent")
         self.pat_ox = QSpinBox()
         self.pat_ox.setRange(-5000, 5000)
         self.pat_oy = QSpinBox()
@@ -263,6 +268,7 @@ class EditorTab(QWidget):
         pl.addRow("Palette", self.pat_palette)
         pl.addRow("Scale", self.pat_scale)
         pl.addRow(self.pat_aa, self.pat_tiled)
+        pl.addRow(self.pat_cutaway)
         pl.addRow("Offset x / y", offs)
         pl.addRow("Blend", self.pat_blend)
         pl.addRow("Opacity", self.pat_opacity)
@@ -318,6 +324,10 @@ class EditorTab(QWidget):
         if idx >= 0:
             self.pattern_combo.setCurrentIndex(idx)
         self._palette_changed()
+
+    def _palette_kind(self, combo) -> str:
+        pal = self.state.library.palettes.get(combo.currentData())
+        return pal.get("kind", "varied") if pal else "varied"
 
     def _palette(self, combo) -> list[str] | None:
         pid = combo.currentData()
@@ -565,10 +575,12 @@ class EditorTab(QWidget):
                 out = (self.image * (1 - strength) + out * strength).round().astype(np.uint8)
         else:
             pals = [pal]
+            kinds = [self._palette_kind(self.palette_combo)]
             p2 = self._palette(self.palette2_combo)
             if p2:
                 pals.append(p2)
-            out = imaging.recolor_regions(self.image, self.selection, pals, strength=strength)
+                kinds.append(self._palette_kind(self.palette2_combo))
+            out = imaging.recolor_regions(self.image, self.selection, pals, strength=strength, kinds=kinds)
         self._commit(out)
 
     @busy
@@ -589,12 +601,15 @@ class EditorTab(QWidget):
         if not pat:
             QMessageBox.information(self, "Editor", "Upload a pattern in the Library first.")
             return
-        pattern = imaging.load_rgba(self.state.library.abspath(pat["image"]))
+        if self.pat_cutaway.isChecked():
+            pattern, cutaway = load_pattern(self.state.library, pat)
+        else:
+            pattern, cutaway = imaging.load_rgba(self.state.library.abspath(pat["image"])), None
         out = imaging.apply_pattern(
             self.image, self.selection, pattern, scale=self.pat_scale.value(),
             antialias=self.pat_aa.isChecked(), tiled=self.pat_tiled.isChecked(),
             offset=(self.pat_ox.value(), self.pat_oy.value()), palette=self._palette(self.pat_palette),
-            blend=self.pat_blend.currentData(), opacity=self.pat_opacity.value() / 100)
+            blend=self.pat_blend.currentData(), opacity=self.pat_opacity.value() / 100, cutaway=cutaway)
         self._commit(out)
 
     def erase_texture(self):
