@@ -355,3 +355,37 @@ def test_multiple_character_images(lib, tmp_path):
     ch.scan_palettes(100, 1.0)
     names = [p["name"] for p in ch.matched_palettes()]
     assert "Teal" in names and "Ruby" in names
+
+
+def test_conversation_engine(lib, tmp_path):
+    import random
+    from ultimate_outfitter.core.interact import TEMPLATES, Conversation
+    ch = _wardrobe_char(lib, tmp_path, ["Underwear Bottoms", "Bras", "Shirts", "Pants", "Shoes"])
+    s = OutfitSession(ch, DayContext("Lounging at home", "Calm", "Warm", setting="Private / at home",
+                                     underwear_only=True))
+    s.build()
+    for e in s.in_use():
+        s.approve(e)
+    s.finalize()
+    conv = Conversation(ch, "Sam", random.Random(3))
+    assert conv.state["setting"] == "Private / at home"
+    for intent in TEMPLATES:
+        if intent.startswith(("issue_", "init_", "accept_", "decline_")) or intent in ("outfit_ok", "change_mood"):
+            continue
+        r = conv.respond(intent)
+        assert r.text and "{" not in r.text, (intent, r.text)
+    for _ in range(20):
+        r = conv.initiative()
+        assert r.text and "{" not in r.text
+    conv.state["setting"] = "Private / at home"
+    assert not any(i == "underdressed" for i, _ in conv.outfit_issues())
+    conv.state["setting"] = "Public"
+    assert any(i == "underdressed" for i, _ in conv.outfit_issues())
+    r = conv.respond("ask_outfit")
+    assert "{" not in r.text
+    r = conv.respond("suggest_activity", activity="Workout / sports")
+    r = conv.respond("set_mood", mood="Happy")
+    assert conv.state["mood"] == "Happy" and r.changes["mood"] == "Happy"
+    assert Conversation.intent_from_text("I love your outfit!") == "compliment_outfit"
+    assert Conversation.intent_from_text("hello there") == "greet"
+    assert ch.data["chat_log"]
