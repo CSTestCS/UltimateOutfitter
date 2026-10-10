@@ -41,7 +41,10 @@ GENERIC = {"base_top": "tops", "mid_layer": "tops", "bra": "tops", "swim_top": "
            "full_body": "onepiece", "swim_full": "onepiece"}
 STOP_WORDS = {"the", "and", "with", "of", "a", "an"}
 
-HEADER = """# Material rules for {name}'s 3D preview (VRoid model)
+HEADER = """# Material rules for {name}'s 3D preview (VRoid model) - OPTIONAL
+# Normally nothing is needed here: when the model is loaded its textures are compared with the
+# wardrobe images, and matched parts get their piece's effects (metallic / silk masks, thin fabric).
+# Rules below only override that.
 # One rule per line:   <part of a material name> = metallic | silk | thin | thick | none
 #   metallic  render as reflective metal (keeps the model's own colours / textures)
 #   silk      soft sheen

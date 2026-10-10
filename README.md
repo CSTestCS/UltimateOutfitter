@@ -179,19 +179,25 @@ fresh chat.
 The preview changes how parts of the VRoid model are **rendered**; the `.vrm` file and its textures are never
 modified.
 
-* **Metallic** parts are drawn as reflective metal that keeps their own colours and textures. A part counts as
-  metallic when its material or texture name contains metallic, metal, chrome, silver, gold, steel or armor, or
-  when it uses a matcap / sphere reflection texture (VRoid's usual way of making shiny metal). Untick
-  *Reflection (matcap) textures are metallic* to turn the matcap rule off.
+* **Automatic matching with the wardrobe:** when a model is loaded, the app reads the texture images stored inside
+  the `.vrm` and compares them with the character's wardrobe images. Resized or re-saved copies still match.
+  Every model part that uses a wardrobe piece's image gets that piece's intended effects. A piece made with a
+  *Metallic…* palette is drawn as reflective metal, but only where its shine mask is: in
+  `Hat-MetallicGreen+Purple` just the MetallicGreen parts reflect. *Silk…* palettes get a soft sheen the same way.
+  A piece whose clothing item is marked **thin** becomes see-through while wet. Older pieces made before shine masks
+  existed get theirs generated automatically. The status line under the viewport lists what was matched.
+* **Fallback:** model parts that don't match the wardrobe still count as **metallic** when their material or
+  texture name says so (metallic, metal, chrome, silver, gold, steel, armor) or when they use a matcap / sphere
+  reflection texture (*Reflection (matcap) textures are metallic*).
 * **Silk** or **satin** parts get a soft sheen.
 * **Wet look:** when it's raining or the character is swimming, the whole character gets a glossy wet shine.
   *Wet look* can also be set to always or never.
 * **Thin clothing:** clothing items have a new question, *How thick is the fabric?* (thin / medium / thick). While
   wet, the parts of the model belonging to **thin** items of the current outfit become about 70% opaque. Parts are
   matched by material names, using the item's name words and its slot (e.g. Tops, Bottoms, Bra, Bikini, Socks).
-* **List model materials** shows every material and what the preview does with it. **Edit materials…** opens the
-  character's `materials.txt`, where you can force any part, e.g. `Bra = metallic`, `Tops_01 = thin`,
-  `Hair = none`.
+* **List model materials** shows every material, which wardrobe piece it matched and what the preview does with it.
+  Manual rules are optional: **Edit materials…** opens the character's `materials.txt`, which can override any
+  part, e.g. `Bra = metallic`, `Tops_01 = thin`, `Hair = none`.
 
 ### Animations
 

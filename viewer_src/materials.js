@@ -216,7 +216,13 @@ function apply() {
     if (e.metal) e.metal.envMapIntensity = envIntensity * 1.2;
     for (const o of effectOverlays) {
       const ms = Array.isArray(o.material) ? o.material : [o.material];
-      for (const m of ms) if (m.userData.effectKind === 'metallic') m.envMapIntensity = envIntensity * 1.2;
+      for (const m of ms) {
+        if (!m.userData.effectKind) continue;
+        if (m.userData.effectKind === 'metallic') m.envMapIntensity = envIntensity * 1.2;
+        // see-through thin clothing: the shine layer fades with the fabric
+        const ent = m.userData.entry;
+        m.opacity = m.userData.baseOpacity * (ent && ent.seeThrough ? wet.thinOpacity : 1);
+      }
     }
     // gloss layer: wet = whole body, silk = sheen on silk parts only
     const g = e.gloss;
@@ -296,6 +302,8 @@ function buildEffectOverlays() {
       mask.colorSpace = THREE.NoColorSpace;
       const mat = maskedEffectMaterial(e, s.kind, mask);
       mat.userData.effectKind = s.kind;
+      mat.userData.entry = e;
+      mat.userData.baseOpacity = mat.opacity;
       slotOverlay(e, mat);
     }
   }
@@ -303,7 +311,7 @@ function buildEffectOverlays() {
 
 export function setMatches(list) {
   matches = list || [];
-  if (entries.length) { reclassify(); buildEffectOverlays(); }
+  if (entries.length) { reclassify(); buildEffectOverlays(); apply(); }
 }
 
 export function setRules(r) {

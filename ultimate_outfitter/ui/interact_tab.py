@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QFil
                                QPlainTextEdit, QPushButton, QSplitter, QStackedWidget, QTextBrowser,
                                QVBoxLayout, QWidget)
 
-from ..core import expressions, material_rules
+from ..core import expressions, material_rules, vrm_match
 from ..core.animations import AnimationLibrary
 from ..core.categories import ACTIVITIES, WEATHER
 from ..core.character import Character, list_characters
@@ -21,7 +21,7 @@ from ..core.interact import Conversation
 from ..core.outfit import MOODS, SETTINGS
 from ..core.storage import safe_name, unique_path
 from ..core.viewer_server import ViewerServer
-from .common import IMAGE_FILTER, AppState, thumb_cache
+from .common import IMAGE_FILTER, AppState, Worker, thumb_cache
 from .viewport3d import Viewport3D
 from .wardrobe_tab import open_folder
 
@@ -278,6 +278,7 @@ class InteractTab(QWidget):
             self._update_stack()
             return
         self.character = Character(self.state.library, Path(path))
+        self.match_info = ""
         self.conv = Conversation(self.character, self.player.text() or "you")
         self.expr = expressions.load(self.character)
         vs = self.character.data.get("viewer", {})
@@ -344,6 +345,43 @@ class InteractTab(QWidget):
                                                 "matcapAsMetal": self.matcap_metal.isChecked()})
         self._apply_wet()
 
+    def _match_wardrobe(self):
+        """Compare the model's textures with the wardrobe images (in the background) and send the
+        matched pieces' effects (shine masks, thin fabric) to the viewer."""
+        ch, rel = self.character, self.loaded_vrm
+        if not ch or not rel:
+            return
+        path = ch.dir / rel
+
+        def done(matches):
+            if self.character is not ch or self.loaded_vrm != rel:
+                return  # another model / character was selected meanwhile
+            payload = []
+            for m in matches:
+                shine = []
+                for sh in m["shine"]:
+                    mask = ch.dir / sh["mask"] if sh.get("mask") else None
+                    shine.append({"kind": sh["kind"],
+                                  "maskUrl": self.server.lib_url(mask) if mask and mask.exists() else None})
+                payload.append(dict(m, shine=shine))
+            self.viewport.call("setWardrobeMatches", payload)
+            self._apply_wet()
+            if matches:
+                bits = []
+                for m in matches:
+                    tags = [s["kind"] for s in m["shine"]] + (["thin"] if m["thin"] else [])
+                    bits.append(f"{m['material']} → {m['item_name']}" + (f" ({', '.join(tags)})" if tags else ""))
+                self.match_info = "Model textures matched to wardrobe pieces: " + "; ".join(bits)
+            else:
+                self.match_info = "No model textures matched the wardrobe images."
+            self._show_status()
+
+        worker = Worker(vrm_match.match_wardrobe, ch, path)
+        worker.finished_ok.connect(done)
+        worker.failed.connect(lambda msg: setattr(self, "match_info", f"Texture matching failed: {msg}"))
+        self._match_worker = worker  # keep a reference while it runs
+        worker.start()
+
     def _apply_wet(self):
         if not self.conv or not self.loaded_vrm:
             return
@@ -397,6 +435,10 @@ class InteractTab(QWidget):
                 tags.append(f"{m['effect'].upper()} ({m.get('why')})")
             if m.get("thin"):
                 tags.append("thin" + (" - see-through now" if m.get("seeThrough") else ""))
+            if m.get("match"):
+                mt = m["match"]
+                tags.append(f"wardrobe piece “{mt['item']}”" + (f": {'/'.join(mt['shine'])}" + (" (masked)" if mt.get("masked") else "")
+                                                             if mt.get("shine") else ""))
             if m.get("matcap") and not m.get("effect"):
                 tags.append("has matcap")
             lines.append(f"{m['name']}" + (f"   <- {', '.join(tags)}" if tags else ""))
@@ -459,6 +501,7 @@ class InteractTab(QWidget):
                 self.model_info = res.get("expressions") or {}
                 self.viewport.call("setLookAtCamera", self.look_cam.isChecked())
                 self._apply_materials()
+                self._match_wardrobe()
                 self._apply_expression()
                 self._apply_idle()
             else:
@@ -608,7 +651,8 @@ class InteractTab(QWidget):
         self.status.setText(
             f"<b>{html.escape(self.character.name)}</b> — mood: <b>{st['mood']}</b>, "
             f"activity: <b>{st['activity']}</b>, setting: <b>{st['setting']}</b>, weather: {st['weather']}<br>"
-            f"<b>Wearing:</b> {html.escape(pieces)}<br><b>Outfit:</b> {fit}{model}")
+            f"<b>Wearing:</b> {html.escape(pieces)}<br><b>Outfit:</b> {fit}{model}"
+            + (f"<br><i>{html.escape(self.match_info)}</i>" if self._vrm_rel() and getattr(self, "match_info", "") else ""))
 
     # ---------------------------------------------------------------- chat
     def _render_log(self):

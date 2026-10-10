@@ -529,3 +529,71 @@ def test_thickness_and_material_rules(lib, tmp_path):
     assert material_rules.is_wet({"activity": "Swimming / beach", "weather": "Warm"}) == (True, 1.0)
     assert material_rules.is_wet({"activity": "Date", "weather": "Rainy"})[0]
     assert not material_rules.is_wet({"activity": "Date", "weather": "Mild"})[0]
+
+
+def _write_glb(path, materials_textures):
+    """Minimal GLB: one material per (name, PIL image) using it as base colour texture."""
+    import io
+    import json as _json
+    import struct
+    binary = b""
+    js = {"asset": {"version": "2.0"}, "images": [], "textures": [], "materials": [], "bufferViews": [],
+          "buffers": []}
+    for i, (name, img) in enumerate(materials_textures):
+        buf = io.BytesIO()
+        img.save(buf, "PNG")
+        data = buf.getvalue()
+        while len(binary) % 4:
+            binary += b"\0"
+        js["bufferViews"].append({"buffer": 0, "byteOffset": len(binary), "byteLength": len(data)})
+        binary += data
+        js["images"].append({"bufferView": i, "mimeType": "image/png", "name": name + "_tex"})
+        js["textures"].append({"source": i})
+        js["materials"].append({"name": name, "pbrMetallicRoughness": {"baseColorTexture": {"index": i},
+                                                                        "metallicFactor": 1.0}})
+    while len(binary) % 4:
+        binary += b"\0"
+    js["buffers"].append({"byteLength": len(binary)})
+    jbytes = _json.dumps(js).encode()
+    while len(jbytes) % 4:
+        jbytes += b" "
+    total = 12 + 8 + len(jbytes) + 8 + len(binary)
+    with open(path, "wb") as f:
+        f.write(struct.pack("<4sII", b"glTF", 2, total))
+        f.write(struct.pack("<I4s", len(jbytes), b"JSON") + jbytes)
+        f.write(struct.pack("<I4s", len(binary), b"BIN\0") + binary)
+
+
+def test_vrm_textures_match_wardrobe_pieces(lib, tmp_path):
+    from ultimate_outfitter.core import vrm_match
+    green = lib.add_palette("MetallicGreen", ["#0B3D20", "#1E8A4A", "#7FE0A0"])
+    purple = lib.add_palette("Purple", ["#3A1060", "#7A3AB0", "#C8A0F0"])
+    ans = _first_answers("Bras")
+    ans["thickness"] = "Thin / sheer / lightweight"
+    t, a = categories.evaluate_answers("Bras", ans)
+    bra = lib.add_item(_garment(tmp_path / "bra.png", color=(150, 150, 150), accent=(40, 40, 40)), "Bra", "Bras",
+                       ans, t, a)
+    shirt_ans = _first_answers("Shirts")
+    t2, a2 = categories.evaluate_answers("Shirts", shirt_ans)
+    shirt = lib.add_item(_garment(tmp_path / "shirt.png", color=(30, 90, 200)), "Shirt", "Shirts", shirt_ans, t2, a2)
+    ch = _wardrobe_char(lib, tmp_path, [], build=False)
+    pieces = ch.build_wardrobe(plan=[
+        {"item": bra, "score": 90, "palettes": [green, purple], "pattern": None},
+        {"item": shirt, "score": 80, "palettes": [purple], "pattern": None},
+    ])
+    bra_entry = next(e for e in pieces if e["item_id"] == bra["id"])
+    # the VRoid model uses the generated bra image (resized, as VRoid would) as a texture
+    tex = Image.open(ch.dir / bra_entry["file"]).resize((256, 256), Image.BILINEAR)
+    other = Image.new("RGBA", (128, 128), (230, 190, 170, 255))  # skin, not from the wardrobe
+    vrm = tmp_path / "model.vrm"
+    _write_glb(vrm, [("N00_010_01_Onepiece_00_CLOTH", tex), ("N00_000_00_Body_00_SKIN", other)])
+    found = vrm_match.match_wardrobe(ch, vrm)
+    assert [m["material"] for m in found] == ["N00_010_01_Onepiece_00_CLOTH"]
+    m = found[0]
+    assert m["entry_id"] == bra_entry["id"] and m["thin"]
+    assert [s["kind"] for s in m["shine"]] == ["metallic"]
+    assert m["shine"][0]["mask"] and (ch.dir / m["shine"][0]["mask"]).exists()
+    # an older piece without saved masks gets them generated on demand
+    del bra_entry["shine_masks"], bra_entry["shine"]
+    found = vrm_match.match_wardrobe(ch, vrm)
+    assert found[0]["shine"] and found[0]["shine"][0]["mask"]
