@@ -625,6 +625,47 @@ class Character:
                     pass
         self.save()
 
+    def ensure_shine_masks(self, entry: dict) -> bool:
+        """Create the shine masks of an older piece whose palettes ask for a shine.
+
+        Re-renders the piece in memory (files are not touched) to find exactly which pixels
+        each "Metallic" / "Silk" palette coloured. Returns True if masks were added.
+        """
+        if entry.get("shine_masks"):
+            return False
+        palettes = [self.library.palettes.get(pid) for pid in entry.get("palettes", [])]
+        item = self.library.items.get(entry.get("item_id"))
+        if not item or not all(palettes):
+            return False
+        if not any(shine_kind(p["name"]) for p in palettes) and not shine_kind(item["name"]):
+            return False
+        pattern = self.library.patterns.get(entry.get("pattern")) if entry.get("pattern") else None
+        shine: list = []
+        try:
+            self.render_piece(item, palettes, pattern, {}, shine_out=shine)
+        except OSError:
+            return False
+        files, kinds = [], set()
+        for n, applied in enumerate(shine):
+            if not applied:
+                continue
+            combined = np.zeros(applied[0][0].shape, dtype=bool)
+            for m, kind in applied:
+                combined |= m
+                kinds.add(kind)
+            mask_dir = self.wardrobe_dir / "Masks"
+            mask_dir.mkdir(exist_ok=True)
+            src = (entry.get("files") or [entry["file"]])[min(n, len(entry.get("files") or [1]) - 1)]
+            mpath = unique_path(mask_dir / f"{Path(src).stem}-shine.png")
+            Image.fromarray((combined * 255).astype(np.uint8), "L").save(mpath)
+            files.append(mpath.relative_to(self.dir).as_posix())
+        if not files:
+            return False
+        entry["shine"] = sorted(kinds)
+        entry["shine_masks"] = files
+        self.save()
+        return True
+
     def entry_path(self, entry: dict) -> Path:
         return self.dir / entry["file"]
 

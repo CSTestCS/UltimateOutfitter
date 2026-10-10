@@ -490,6 +490,7 @@ window.UO = {
   screenshot() { renderer.render(scene, camera); return renderer.domElement.toDataURL('image/png'); },
   setMaterialRules(r) { Mat.setRules(r); return Mat.list(); },
   setWet(w) { Mat.setWet(w); return true; },
+  setWardrobeMatches(list) { Mat.setMatches(list); return Mat.list(); },
   listMaterials() { return Mat.list(); },
   info() { return { model: !!vrm, idle: idleClip, expression: expressionWeights }; },
 };

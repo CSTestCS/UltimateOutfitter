@@ -16,6 +16,9 @@ let overlays = [];         // wet / silk gloss layers, one per mesh
 let rules = { overrides: {}, matcapAsMetal: true };
 let wet = { on: false, strength: 1, thin: [], thinOpacity: 0.7 };
 let envIntensity = 1;
+let matches = [];          // wardrobe pieces found among the model's textures (from Python)
+let effectOverlays = [];   // masked metallic / silk layers for matched pieces
+const maskLoader = new THREE.TextureLoader();
 
 export function init(r, s) {
   renderer = r;
@@ -49,8 +52,22 @@ function overrideFor(name) {
   return best ? best[1] : null;
 }
 
+function matchFor(e) {
+  return matches.find((m) => m.material === e.name) || null;
+}
+
 function classify(e) {
   const name = e.name;
+  const m = matchFor(e);
+  if (m) {
+    e.match = m;
+    // a matched piece with a mask gets a masked overlay instead of a whole-material swap
+    const unmasked = (m.shine || []).find((s) => !s.maskUrl);
+    if (unmasked) return { effect: unmasked.kind, why: `wardrobe piece "${m.item_name}"` };
+    if ((m.shine || []).length) return { effect: null, why: `wardrobe piece "${m.item_name}" (masked)` };
+  } else {
+    e.match = null;
+  }
   const ov = overrideFor(name);
   if (ov === 'none' || ov === 'thin' || ov === 'thick') e.forced = ov;
   if (ov === 'metallic' || ov === 'silk') return { effect: ov, why: 'materials.txt' };
@@ -107,6 +124,7 @@ function glossMaterial(src) {
 
 export function attach(vrm, gltfJson) {
   detach();
+  matches = [];
   vrm.scene.traverse((obj) => {
     if (!obj.isMesh || obj.userData.isGlossOverlay) return;
     const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
@@ -150,6 +168,7 @@ export function attach(vrm, gltfJson) {
 export function detach() {
   for (const o of overlays) if (o.parent) o.parent.remove(o);
   overlays = [];
+  clearEffectOverlays();
   entries = [];
 }
 
@@ -177,6 +196,7 @@ function reclassify() {
 
 function isThin(e) {
   if (e.forced === 'thin') return true;
+  if (e.match && e.forced !== 'thick') return !!e.match.thin;
   if (e.forced === 'thick' || NEVER_SEE_THROUGH.test(e.name)) return false;
   const low = e.name.toLowerCase();
   return (wet.thin || []).some((k) => k && low.includes(k.toLowerCase()));
@@ -194,6 +214,10 @@ function apply() {
     if (mat === e.original) mat.depthWrite = seeThrough ? false : e.base.depthWrite;
     e.seeThrough = seeThrough;
     if (e.metal) e.metal.envMapIntensity = envIntensity * 1.2;
+    for (const o of effectOverlays) {
+      const ms = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of ms) if (m.userData.effectKind === 'metallic') m.envMapIntensity = envIntensity * 1.2;
+    }
     // gloss layer: wet = whole body, silk = sheen on silk parts only
     const g = e.gloss;
     if (wet.on) {
@@ -220,6 +244,68 @@ function apply() {
   }
 }
 
+function clearEffectOverlays() {
+  for (const o of effectOverlays) if (o.parent) o.parent.remove(o);
+  effectOverlays = [];
+}
+
+// a copy of the mesh that only draws one material slot, with ``mat``
+function slotOverlay(e, mat) {
+  const src = e.mesh;
+  const mats = Array.isArray(src.material)
+    ? src.material.map((_, i) => (i === e.index ? mat : new THREE.MeshBasicMaterial({ visible: false })))
+    : mat;
+  const o = src.isSkinnedMesh ? new THREE.SkinnedMesh(src.geometry, mats) : new THREE.Mesh(src.geometry, mats);
+  if (src.isSkinnedMesh) o.bind(src.skeleton, src.bindMatrix);
+  o.morphTargetInfluences = src.morphTargetInfluences;
+  o.morphTargetDictionary = src.morphTargetDictionary;
+  o.userData.isGlossOverlay = true;
+  o.frustumCulled = false;
+  o.castShadow = false;
+  o.renderOrder = (src.renderOrder || 0) + 1;
+  src.add(o);
+  effectOverlays.push(o);
+  return o;
+}
+
+function maskedEffectMaterial(e, kind, mask) {
+  const src = e.original;
+  if (kind === 'metallic') {
+    return new THREE.MeshStandardMaterial({
+      map: src.map || null, color: src.color ? src.color.clone() : new THREE.Color(1, 1, 1),
+      metalness: 1.0, roughness: 0.22, alphaMap: mask, transparent: true, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1, side: src.side,
+      envMapIntensity: envIntensity * 1.2,
+    });
+  }
+  const g = glossMaterial(src);   // silk: soft additive sheen limited by the mask
+  g.alphaMap = mask;
+  g.roughness = 0.4; g.clearcoat = 0.3; g.clearcoatRoughness = 0.35; g.opacity = 0.35;
+  g.envMapIntensity = envIntensity * 0.4;
+  return g;
+}
+
+function buildEffectOverlays() {
+  clearEffectOverlays();
+  for (const e of entries) {
+    if (!e.match) continue;
+    for (const s of e.match.shine || []) {
+      if (!s.maskUrl) continue;
+      const mask = maskLoader.load(s.maskUrl);
+      mask.flipY = false;               // glTF texture convention
+      mask.colorSpace = THREE.NoColorSpace;
+      const mat = maskedEffectMaterial(e, s.kind, mask);
+      mat.userData.effectKind = s.kind;
+      slotOverlay(e, mat);
+    }
+  }
+}
+
+export function setMatches(list) {
+  matches = list || [];
+  if (entries.length) { reclassify(); buildEffectOverlays(); }
+}
+
 export function setRules(r) {
   rules = Object.assign({ overrides: {}, matcapAsMetal: true }, r || {});
   if (entries.length) reclassify();
@@ -238,6 +324,8 @@ export function setEnvIntensity(v) {
 export function list() {
   return entries.map((e) => ({
     name: e.name, effect: e.effect, why: e.why, thin: isThin(e), seeThrough: !!e.seeThrough,
+    match: e.match ? { item: e.match.item_name, file: e.match.file, shine: (e.match.shine || []).map((s) => s.kind),
+                       masked: (e.match.shine || []).some((s) => !!s.maskUrl) } : null,
     texture: texName(e.original.map).trim(), metallicFactor: e.json.metallicFactor,
     matcap: !!e.original.matcapTexture,
   }));
