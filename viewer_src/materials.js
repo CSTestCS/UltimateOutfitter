@@ -58,7 +58,7 @@ function classify(e) {
   const tname = texName(e.original.map);
   if (METAL_WORDS.test(name) || METAL_WORDS.test(tname)) return { effect: 'metallic', why: 'name' };
   if (SILK_WORDS.test(name) || SILK_WORDS.test(tname)) return { effect: 'silk', why: 'name' };
-  if (e.json.metallicFactor >= 0.5) return { effect: 'metallic', why: 'metallic factor' };
+  // note: the glTF metallicFactor is NOT used - VRM exporters often write 1.0 for every material
   if (rules.matcapAsMetal && e.original.matcapTexture && !NEVER_SEE_THROUGH.test(name)) {
     return { effect: 'metallic', why: 'matcap (reflection) texture' };
   }
@@ -198,18 +198,18 @@ function apply() {
     const g = e.gloss;
     if (wet.on) {
       g.visible = true;
-      g.roughness = 0.14;
-      g.clearcoat = 1.0 * wet.strength;
-      g.clearcoatRoughness = 0.06;
-      g.opacity = 0.85 * wet.strength;
-      g.envMapIntensity = envIntensity * 1.4;
+      g.roughness = 0.22;
+      g.clearcoat = 0.7;
+      g.clearcoatRoughness = 0.1;
+      g.opacity = 0.32 * wet.strength;
+      g.envMapIntensity = envIntensity * 0.45;
     } else if (e.effect === 'silk') {
       g.visible = true;
-      g.roughness = 0.38;
-      g.clearcoat = 0.35;
-      g.clearcoatRoughness = 0.3;
-      g.opacity = 0.7;
-      g.envMapIntensity = envIntensity * 0.8;
+      g.roughness = 0.4;
+      g.clearcoat = 0.3;
+      g.clearcoatRoughness = 0.35;
+      g.opacity = 0.3;
+      g.envMapIntensity = envIntensity * 0.35;
     } else {
       g.visible = false;
     }

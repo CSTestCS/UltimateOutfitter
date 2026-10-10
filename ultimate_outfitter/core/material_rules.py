@@ -52,8 +52,8 @@ HEADER = """# Material rules for {name}'s 3D preview (VRoid model)
 # in the Interact tab to see the material names and what was detected.
 #
 # Automatic detection (no rule needed): material or texture names containing metallic, metal,
-# chrome, silver, gold, steel, armor (-> metallic) or silk, satin (-> silk), a glTF metallic
-# factor of 0.5 or more, or a matcap / sphere-add reflection texture (can be switched off).
+# chrome, silver, gold, steel, armor (-> metallic) or silk, satin (-> silk), or a matcap /
+# sphere-add reflection texture (VRoid's way of making shiny metal; can be switched off).
 #
 # Examples:
 # Bra = metallic

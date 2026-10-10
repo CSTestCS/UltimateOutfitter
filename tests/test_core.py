@@ -497,3 +497,35 @@ def test_metallic_palette_shines_only_its_own_parts(lib, tmp_path):
     shine2: list = []
     ch.render_piece(silk, [plain_green, purple], None, {}, shine_out=shine2)
     assert shine2[0] and shine2[0][0][1] == "silk"
+
+
+def test_thickness_and_material_rules(lib, tmp_path):
+    from ultimate_outfitter.core import material_rules
+    qids = [q.id for q in categories.questions_for("Bras")]
+    assert "thickness" in qids and "thickness" not in [q.id for q in categories.questions_for("Jewelry")]
+    ch = _wardrobe_char(lib, tmp_path, [], build=False)
+    (ch.dir / "materials.txt").write_text(material_rules.HEADER.format(name="x") +
+                                          "Bra = metallic\nTops_01 = thin\nHair = none\nBad = sparkly\n",
+                                          encoding="utf-8")
+    assert material_rules.load_overrides(ch) == {"Bra": "metallic", "Tops_01": "thin", "Hair": "none"}
+    # thin pieces of the current outfit -> material keywords
+    ans = _first_answers("Bras")
+    ans["thickness"] = "Thin / sheer / lightweight"
+    t, a = categories.evaluate_answers("Bras", ans)
+    assert a["thickness"] == "thin"
+    bra = lib.add_item(_garment(tmp_path / "b.png"), "Bikini Bra", "Bras", ans, t, a)
+    ans2 = _first_answers("Shirts")
+    ans2["thickness"] = "Thick / heavy"
+    t2, a2 = categories.evaluate_answers("Shirts", ans2)
+    shirt = lib.add_item(_garment(tmp_path / "s.png"), "Tee", "Shirts", ans2, t2, a2)
+    ch.data["wardrobe"] = {"e1": {"item_id": bra["id"], "slot": "bra"}, "e2": {"item_id": shirt["id"], "slot": "base_top"}}
+    ch.data["current_outfit"] = {"pieces": [{"entry_id": "e1", "slot": "bra", "name": "Bikini Bra"},
+                                            {"entry_id": "e2", "slot": "base_top", "name": "Tee"}]}
+    kw = material_rules.thin_keywords(ch)
+    assert {"bra", "bikini"} <= set(kw)
+    assert "tops" not in kw  # a thick top shares VRoid's "Tops" material, so it isn't made see-through
+    del ch.data["current_outfit"]["pieces"][1]
+    assert "tops" in material_rules.thin_keywords(ch)
+    assert material_rules.is_wet({"activity": "Swimming / beach", "weather": "Warm"}) == (True, 1.0)
+    assert material_rules.is_wet({"activity": "Date", "weather": "Rainy"})[0]
+    assert not material_rules.is_wet({"activity": "Date", "weather": "Mild"})[0]

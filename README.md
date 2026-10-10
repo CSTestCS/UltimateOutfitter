@@ -174,6 +174,25 @@ fresh chat.
   `surprised`, `blink`, `aa`...) or raw VRoid blend shapes (`Fcl_ALL_Joy`, `Fcl_EYE_Close`...). Use *Edit
   expressions…* to change it, and *List model blend shapes* to see the names your model supports.
 
+### Materials: metallic, silk, wet and thin clothing
+
+The preview changes how parts of the VRoid model are **rendered**; the `.vrm` file and its textures are never
+modified.
+
+* **Metallic** parts are drawn as reflective metal that keeps their own colours and textures. A part counts as
+  metallic when its material or texture name contains metallic, metal, chrome, silver, gold, steel or armor, or
+  when it uses a matcap / sphere reflection texture (VRoid's usual way of making shiny metal). Untick
+  *Reflection (matcap) textures are metallic* to turn the matcap rule off.
+* **Silk** or **satin** parts get a soft sheen.
+* **Wet look:** when it's raining or the character is swimming, the whole character gets a glossy wet shine.
+  *Wet look* can also be set to always or never.
+* **Thin clothing:** clothing items have a new question, *How thick is the fabric?* (thin / medium / thick). While
+  wet, the parts of the model belonging to **thin** items of the current outfit become about 70% opaque. Parts are
+  matched by material names, using the item's name words and its slot (e.g. Tops, Bottoms, Bra, Bikini, Socks).
+* **List model materials** shows every material and what the preview does with it. **Edit materials…** opens the
+  character's `materials.txt`, where you can force any part, e.g. `Bra = metallic`, `Tops_01 = thin`,
+  `Hair = none`.
+
 ### Animations
 
 Raw **.fbx** animations go in the library's `Animations` folder (button *Animations folder*). Mixamo
