@@ -236,6 +236,15 @@ PRINT_Q = Q("print", "Can this item be made with a print / pattern?", [
 
 NO_PRINT_SLOTS = {"jewelry", "eyes", "armor", "wrists"}
 
+THICKNESS_Q = Q("thickness", "How thick is the fabric?", [
+    O("Thin / sheer / lightweight", "flirty romantic", thickness="thin"),
+    O("Medium", "practical", thickness="medium"),
+    O("Thick / heavy", "cozy modest", thickness="thick", dwarmth=1),
+])
+
+# slots without a fabric thickness (hard goods, accessories)
+NO_FABRIC_SLOTS = {"jewelry", "eyes", "armor", "wrists", "waist", "bag", "face", "extras", "hair", "footwear"}
+
 ACTIVITY_Q = Q("activities", "Which activities is it suitable for? (choose any)",
                [O(a, "", activities=[a]) for a in ACTIVITIES], multi=True)
 
@@ -835,6 +844,8 @@ def questions_for(category: str) -> list[Question]:
         qs += GENERAL_BLOCK
     if cat.weather_q:
         qs.append(WEATHER_Q)
+    if cat.slot not in NO_FABRIC_SLOTS:
+        qs.append(THICKNESS_Q)
     qs.append(PRINT_Q)
     qs.append(ACTIVITY_Q)
     # de-duplicate ids while preserving order (blocks may be reused)
@@ -860,6 +871,7 @@ def evaluate_answers(category: str, answers: dict[str, Any]) -> tuple[dict[str, 
         "warmth": cat.warmth, "formality": 1, "coverage": 2,
         "activities": list(cat.activities),
         "print": "none" if cat.slot in NO_PRINT_SLOTS else "primary",
+        "thickness": "medium",
     }
     explicit_warmth = None
     dwarmth = 0

@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QFil
                                QPlainTextEdit, QPushButton, QSplitter, QStackedWidget, QTextBrowser,
                                QVBoxLayout, QWidget)
 
-from ..core import expressions
+from ..core import expressions, material_rules
 from ..core.animations import AnimationLibrary
 from ..core.categories import ACTIVITIES, WEATHER
 from ..core.character import Character, list_characters
@@ -124,11 +124,32 @@ class InteractTab(QWidget):
         for w in (b_expr, b_shapes, b_anim_dir, b_anim_reload):
             view_bar3.addWidget(w)
         view_bar3.addStretch(1)
+        self.wet_mode = QComboBox()
+        self.wet_mode.addItem("Wet look: automatic (rain / swimming)", "auto")
+        self.wet_mode.addItem("Wet look: always", "on")
+        self.wet_mode.addItem("Wet look: never", "off")
+        self.wet_mode.currentIndexChanged.connect(lambda *_: self._apply_wet())
+        self.matcap_metal = QCheckBox("Reflection (matcap) textures are metallic")
+        self.matcap_metal.setChecked(True)
+        self.matcap_metal.setToolTip("VRoid uses matcap / sphere textures for shiny metal; render those parts "
+                                     "as reflective metal")
+        self.matcap_metal.toggled.connect(lambda *_: self._apply_materials())
+        b_mats = QPushButton("Edit materials…")
+        b_mats.setToolTip("Open this character's materials.txt (force parts of the model to be metallic, silk, "
+                          "thin or thick)")
+        b_mats.clicked.connect(self.edit_materials)
+        b_mat_list = QPushButton("List model materials")
+        b_mat_list.clicked.connect(lambda: self.viewport.call("listMaterials", report="materials"))
+        view_bar4 = QHBoxLayout()
+        for w in (self.wet_mode, self.matcap_metal, b_mats, b_mat_list):
+            view_bar4.addWidget(w)
+        view_bar4.addStretch(1)
         left = QVBoxLayout()
         left.addWidget(self.stack, 1)
         left.addLayout(view_bar1)
         left.addLayout(view_bar2)
         left.addLayout(view_bar3)
+        left.addLayout(view_bar4)
         left.addWidget(self.status)
         lw = QWidget()
         lw.setLayout(left)
@@ -300,6 +321,7 @@ class InteractTab(QWidget):
         self._apply_lighting()
         self._apply_background()
         self._apply_expression()
+        self._apply_materials()
         self._update_stack()
 
     def _apply_lighting(self):
@@ -313,6 +335,79 @@ class InteractTab(QWidget):
             p = self.state.library.root / bg["path"]
             bg["url"] = self.server.lib_url(p) if p.exists() else ""
         self.viewport.call("setBackground", bg)
+
+    def _apply_materials(self):
+        """Metallic / silk detection rules for the loaded model, then the wet look."""
+        if not self.character or not self.loaded_vrm:
+            return
+        self.viewport.call("setMaterialRules", {"overrides": material_rules.load_overrides(self.character),
+                                                "matcapAsMetal": self.matcap_metal.isChecked()})
+        self._apply_wet()
+
+    def _apply_wet(self):
+        if not self.conv or not self.loaded_vrm:
+            return
+        mode = self.wet_mode.currentData()
+        wet, strength = material_rules.is_wet(self.conv.state)
+        if mode == "on":
+            wet, strength = True, max(strength, 1.0)
+        elif mode == "off":
+            wet = False
+        self.viewport.call("setWet", {"on": wet, "strength": strength or 1.0, "thinOpacity": 0.7,
+                                      "thin": material_rules.thin_keywords(self.character)})
+
+    def edit_materials(self):
+        if not self.character:
+            return
+        path = material_rules.ensure_config(self.character)
+        self._edit_text_file(path, f"{self.character.name} - materials.txt", self._apply_materials)
+
+    def _edit_text_file(self, path, title, on_save):
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        dlg.resize(760, 620)
+        edit = QPlainTextEdit(path.read_text(encoding="utf-8"))
+        edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        b_save = QPushButton("Save")
+        b_open = QPushButton("Open in text editor")
+        b_open.clicked.connect(lambda: open_folder(path))
+        row = QHBoxLayout()
+        row.addWidget(b_open)
+        row.addStretch(1)
+        row.addWidget(b_save)
+        lay = QVBoxLayout(dlg)
+        lay.addWidget(edit)
+        lay.addLayout(row)
+
+        def save():
+            path.write_text(edit.toPlainText(), encoding="utf-8")
+            dlg.accept()
+        b_save.clicked.connect(save)
+        dlg.exec()
+        on_save()
+
+    def _show_materials(self, mats: list):
+        if not mats:
+            QMessageBox.information(self, "Model materials", "Load a VRoid model first.")
+            return
+        lines = []
+        for m in mats:
+            tags = []
+            if m.get("effect"):
+                tags.append(f"{m['effect'].upper()} ({m.get('why')})")
+            if m.get("thin"):
+                tags.append("thin" + (" - see-through now" if m.get("seeThrough") else ""))
+            if m.get("matcap") and not m.get("effect"):
+                tags.append("has matcap")
+            lines.append(f"{m['name']}" + (f"   <- {', '.join(tags)}" if tags else ""))
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Model materials")
+        dlg.resize(720, 560)
+        text = QPlainTextEdit("Material name   <- what the preview does with it\n\n" + "\n".join(lines) +
+                              "\n\nChange anything with “Edit materials…”, e.g.  Bra = metallic")
+        text.setReadOnly(True)
+        QVBoxLayout(dlg).addWidget(text)
+        dlg.exec()
 
     def _apply_expression(self):
         if self.conv:
@@ -343,6 +438,8 @@ class InteractTab(QWidget):
         if "weather" in reply.changes:
             self._apply_lighting()
             self._apply_background()
+        if reply.changes.keys() & {"activity", "weather"}:
+            self._apply_wet()
         self._apply_expression()
         if reply.reaction:
             w = expressions.weights_for(self.expr, reply.reaction)
@@ -361,11 +458,14 @@ class InteractTab(QWidget):
             if res.get("ok"):
                 self.model_info = res.get("expressions") or {}
                 self.viewport.call("setLookAtCamera", self.look_cam.isChecked())
+                self._apply_materials()
                 self._apply_expression()
                 self._apply_idle()
             else:
                 self.status.setText(f"Could not load the model: {res.get('error')}")
                 self.loaded_vrm = None
+        elif ev.get("event") == "materials":
+            self._show_materials(ev.get("result") or [])
         elif ev.get("event") == "shapes":
             res = ev.get("result") or {}
             self._show_shapes(res)
