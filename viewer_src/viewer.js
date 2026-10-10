@@ -6,6 +6,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
+import * as Mat from './materials.js';
 
 // ---------------------------------------------------------------------------
 // scene setup
@@ -29,6 +30,8 @@ controls.screenSpacePanning = true;
 controls.minDistance = 0.2;
 controls.maxDistance = 30;
 controls.update();
+
+Mat.init(renderer, scene);
 
 const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
 scene.add(hemi);
@@ -185,6 +188,7 @@ async function loadVRM(url) {
     mixer = new THREE.AnimationMixer(vrm.scene);
     currentAction = null;
     idleClip = null;
+    Mat.attach(vrm, gltf.parser && gltf.parser.json);
     relaxArms();
     frameModel();
     setStatus('');
@@ -196,6 +200,7 @@ async function loadVRM(url) {
 }
 
 function clearModel() {
+  Mat.detach();
   if (vrm) { scene.remove(vrm.scene); VRMUtils.deepDispose(vrm.scene); }
   vrm = null; mixer = null; currentAction = null; idleClip = null;
 }
@@ -382,6 +387,7 @@ function setLighting(opts = {}) {
   hemi.groundColor.set(p[4]);
   hemi.intensity = p[5] * w[1];
   fill.intensity = 0.35 * w[1];
+  Mat.setEnvIntensity(Math.max(0.25, p[5] * w[1]));
   const grey = (c) => { const l = c.r * 0.3 + c.g * 0.59 + c.b * 0.11; return new THREE.Color(l, l, l); };
   const top = new THREE.Color(p[6]); const bottom = new THREE.Color(p[7]);
   sky.top = top.lerp(grey(top), w[4]);
@@ -482,6 +488,9 @@ window.UO = {
   stopAnimation,
   listExpressions,
   screenshot() { renderer.render(scene, camera); return renderer.domElement.toDataURL('image/png'); },
+  setMaterialRules(r) { Mat.setRules(r); return Mat.list(); },
+  setWet(w) { Mat.setWet(w); return true; },
+  listMaterials() { return Mat.list(); },
   info() { return { model: !!vrm, idle: idleClip, expression: expressionWeights }; },
 };
 setLighting({ weather: 'Mild', time: 'auto' });
