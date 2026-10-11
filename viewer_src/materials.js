@@ -41,7 +41,6 @@ let matches = [];          // wardrobe pieces found among the model's textures (
 let effectOverlays = [];   // masked metallic / silk layers for matched pieces
 let outlines = [];         // MToon outline material slots: [{mesh, mat}]
 let hiddenEntries = new Set();   // wardrobe entry ids taken off - their model parts are hidden
-let hiddenWords = [];            // fallback material-name words for removed pieces with no texture match
 const maskLoader = new THREE.TextureLoader();
 
 export function init(r, s) {
@@ -233,11 +232,10 @@ function reclassify() {
 }
 
 function isThin(e) {
+  // see-through when wet only for texture-matched thin wardrobe pieces (or a materials.txt rule)
   if (e.forced === 'thin') return true;
-  if (e.match && e.forced !== 'thick') return !!e.match.thin;
-  if (e.forced === 'thick' || NEVER_SEE_THROUGH.test(e.name)) return false;
-  const low = e.name.toLowerCase();
-  return (wet.thin || []).some((k) => k && low.includes(k.toLowerCase()));
+  if (e.forced === 'thick') return false;
+  return !!(e.match && e.match.thin);
 }
 
 function apply() {
@@ -267,8 +265,8 @@ function apply() {
       }
     }
     // pieces taken off are hidden (with their outline and effect layers)
-    e.hidden = e.match ? hiddenEntries.has(e.match.entry_id)
-      : (!NEVER_SEE_THROUGH.test(e.name) && hiddenWords.some((w) => w && e.name.toLowerCase().includes(w.toLowerCase())));
+    // only model parts whose texture matched a removed wardrobe piece are hidden
+    e.hidden = !!(e.match && hiddenEntries.has(e.match.entry_id));
     mat.visible = !e.hidden;
     // gloss layer: wet = whole body, silk = sheen on silk parts only
     const g = e.gloss;
@@ -308,7 +306,6 @@ function apply() {
 
 export function setHidden(h) {
   hiddenEntries = new Set((h && h.entries) || []);
-  hiddenWords = (h && h.words) || [];
   apply();
   return entries.filter((e) => e.hidden).map((e) => e.name);
 }

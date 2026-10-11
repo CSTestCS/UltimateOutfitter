@@ -508,24 +508,10 @@ def test_thickness_and_material_rules(lib, tmp_path):
                                           "Bra = metallic\nTops_01 = thin\nHair = none\nBad = sparkly\n",
                                           encoding="utf-8")
     assert material_rules.load_overrides(ch) == {"Bra": "metallic", "Tops_01": "thin", "Hair": "none"}
-    # thin pieces of the current outfit -> material keywords
     ans = _first_answers("Bras")
     ans["thickness"] = "Thin / sheer / lightweight"
     t, a = categories.evaluate_answers("Bras", ans)
     assert a["thickness"] == "thin"
-    bra = lib.add_item(_garment(tmp_path / "b.png"), "Bikini Bra", "Bras", ans, t, a)
-    ans2 = _first_answers("Shirts")
-    ans2["thickness"] = "Thick / heavy"
-    t2, a2 = categories.evaluate_answers("Shirts", ans2)
-    shirt = lib.add_item(_garment(tmp_path / "s.png"), "Tee", "Shirts", ans2, t2, a2)
-    ch.data["wardrobe"] = {"e1": {"item_id": bra["id"], "slot": "bra"}, "e2": {"item_id": shirt["id"], "slot": "base_top"}}
-    ch.data["current_outfit"] = {"pieces": [{"entry_id": "e1", "slot": "bra", "name": "Bikini Bra"},
-                                            {"entry_id": "e2", "slot": "base_top", "name": "Tee"}]}
-    kw = material_rules.thin_keywords(ch)
-    assert {"bra", "bikini"} <= set(kw)
-    assert "tops" not in kw  # a thick top shares VRoid's "Tops" material, so it isn't made see-through
-    del ch.data["current_outfit"]["pieces"][1]
-    assert "tops" in material_rules.thin_keywords(ch)
     assert material_rules.is_wet({"activity": "Swimming / beach", "weather": "Warm"}) == (True, 1.0)
     assert material_rules.is_wet({"activity": "Date", "weather": "Rainy"})[0]
     assert not material_rules.is_wet({"activity": "Date", "weather": "Mild"})[0]
@@ -706,10 +692,6 @@ def test_preview_settings_and_wet_rules(lib, tmp_path):
     assert expressions.load(ch)["happy"] == {"happy": 0.4, "Fcl_ALL_Joy": 0.5}
     assert material_rules.is_wet({"weather": "Scorching hot"})[0]
     assert not material_rules.is_wet({"weather": "Warm"})[0]
-    # words for a removed piece never include words of pieces still worn
-    ch.data["current_outfit"] = {"id": "o1", "pieces": [{"slot": "legs", "name": "Jeans", "entry_id": "x"}]}
-    words = material_rules.removed_keywords(ch, [{"slot": "base_top", "name": "Striped Shirt", "entry_id": "y"}])
-    assert "shirt" in words and "striped" in words and "tops" in words and "bottoms" not in words
 
 
 def test_outfit_changes_in_conversation(lib, tmp_path):
@@ -845,3 +827,23 @@ def test_manual_piece_options(lib, tmp_path):
     entry, = ch.build_wardrobe(item_ids=[], plan=[{"item": hat, "palettes": [a], "pattern": None, "score": 70,
                                                    "shine": ("metallic", 0), "custom": True, "lock": True}])
     assert entry["custom"] and entry["shine"] == ["metallic"] and entry["id"] in ch.data["dresser"]
+
+
+def test_similar_texture_is_not_the_piece(lib, tmp_path):
+    """The character's own hair looks like a hair-made capelet, but only the capelet texture matches."""
+    from ultimate_outfitter.core import vrm_match
+    pal = lib.add_palette("Brown", ["#5A3A20", "#8A6040", "#C09070"])
+    ans = _first_answers("Capes/Cloaks") if "Capes/Cloaks" in categories.CATEGORY_BY_NAME else _first_answers("Shirts")
+    cat = "Capes/Cloaks" if "Capes/Cloaks" in categories.CATEGORY_BY_NAME else "Shirts"
+    t, a = categories.evaluate_answers(cat, ans)
+    cape = lib.add_item(_garment(tmp_path / "cape.png", color=(140, 100, 70)), "Capelet", cat, ans, t, a)
+    ch = _wardrobe_char(lib, tmp_path, [], build=False)
+    entry, = ch.build_wardrobe(item_ids=[], plan=[{"item": cape, "score": 80, "palettes": [pal], "pattern": None}])
+    exact = Image.open(ch.dir / entry["file"]).convert("RGBA").resize((256, 256), Image.BILINEAR)
+    arr = np.array(exact).astype(int)
+    arr[..., :3] = np.clip(arr[..., :3] + 9, 0, 255)          # the hair: same layout, slightly different colour
+    similar = Image.fromarray(arr.astype(np.uint8), "RGBA")
+    vrm = tmp_path / "hair.vrm"
+    _write_glb(vrm, [("N00_000_Hair_00_HAIR", similar), ("N00_005_Hair_01_HAIR_Capelet", exact)])
+    found = vrm_match.match_wardrobe(ch, vrm)
+    assert [m["material"] for m in found] == ["N00_005_Hair_01_HAIR_Capelet"]

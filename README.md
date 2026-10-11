@@ -214,7 +214,9 @@ modified.
 
 * **Automatic matching with the wardrobe:** when a model is loaded, the app reads the texture images stored inside
   the `.vrm` and compares them with the character's wardrobe images. Resized or re-saved copies still match.
-  Every model part that uses a wardrobe piece's image gets that piece's intended effects. A piece made with a
+  Every model part that uses a wardrobe piece's image gets that piece's intended effects. A wardrobe image is
+  matched only to the model texture(s) closest to it, so a texture that just looks similar (such as the
+  character's own hair next to a hair-made capelet) is not mistaken for the piece. A piece made with a
   *Metallic…* palette is drawn as reflective metal, but only where its shine mask is: in
   `Hat-MetallicGreen+Purple` just the MetallicGreen parts reflect. *Silk…* palettes get a soft sheen the same way.
   A piece whose clothing item is marked **thin** becomes see-through while wet. Older pieces made before shine masks
@@ -234,8 +236,8 @@ modified.
   can also be set to always or never. The status line under the viewport shows whether the character is wet and
   why.
 * **Thin clothing:** clothing items have a new question, *How thick is the fabric?* (thin / medium / thick). While
-  wet, the parts of the model belonging to **thin** items of the current outfit become about 70% opaque. Parts are
-  matched by material names, using the item's name words and its slot (e.g. Tops, Bottoms, Bra, Bikini, Socks).
+  wet, the model parts whose texture matched a **thin** wardrobe piece become about 70% opaque. Nothing is guessed
+  from material names; a `materials.txt` rule can mark a part thin or thick by hand.
 * **Physics:** the model's spring bones (hair, skirts, ribbons...) swing with every movement. A gentle idle sway
   keeps them alive when no animation is playing, they blow in the wind when it's **Windy** (a little in rain and
   cold), and wet hair hangs heavier.
@@ -305,8 +307,8 @@ shy, confident, edgy, elegant, flirty, mysterious or laid-back, chosen from the 
   them talk* or right after the weather or activity changes. A bar above the chat asks you to **Agree** or
   **Refuse**, and nothing changes until you agree. If you refuse, they won't ask about that piece again.
 * Accepted changes update the shown outfit: its piece list and contact sheet in the Outfit Manager, and the 3D
-  model. The model parts that use a removed piece's texture are **hidden**. If no texture matched the piece, parts
-  named after it are hidden instead (e.g. *Tops* for a shirt, unless another worn piece also uses that name).
+  model. Only the model parts whose texture matched the removed piece are **hidden**; nothing is hidden by name or
+  type, so a piece whose texture wasn't found on the model stays visible.
   Removed pieces stay in the hamper. Tip: VRoid Studio can delete body polygons hidden under clothing when it
   exports; turn that off if you want to see the body under removed pieces.
 

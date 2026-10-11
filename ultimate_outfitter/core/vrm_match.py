@@ -24,6 +24,7 @@ SIG_SIZE = 48
 # (VRoid's hair system is used for capes, ribbons...), so they are matched like any other part.
 NOT_CLOTHING = re.compile(r"skin|face|eye|mouth|brow|lash|teeth|tongue|iris", re.I)
 MATCH_THRESHOLD = 14.0     # mean colour difference (0-255) allowed for a match
+MUTUAL_TOLERANCE = 1.0     # textures this close to a wardrobe image's best match also count (duplicates)
 
 
 # ---------------------------------------------------------------------------
@@ -169,18 +170,32 @@ def match_wardrobe(character, vrm_path: Path | str, threshold: float = MATCH_THR
         sig = file_signature(character.dir / rel)
         if sig is not None:
             sigs[(eid, i)] = sig
-    results = []
     tex_sigs: dict[int, np.ndarray] = {}
     for m in mats:
         if m["image_index"] not in tex_sigs:
             tex_sigs[m["image_index"]] = signature(m["image"])
-        tsig = tex_sigs[m["image_index"]]
-        best = None
-        for (eid, i), sig in sigs.items():
+    # every (model texture, wardrobe image) pair close enough to be the same picture
+    pairs: dict[tuple[int, tuple[str, int]], float] = {}
+    for img, tsig in tex_sigs.items():
+        for key, sig in sigs.items():
             d = difference(tsig, sig)
+            if d <= threshold:
+                pairs[(img, key)] = d
+    # a wardrobe image belongs only to the model texture(s) it matches best: a texture that merely
+    # looks similar (e.g. the character's own hair next to a hair-made capelet) is not that piece
+    best_for_file: dict[tuple[str, int], float] = {}
+    for (img, key), d in pairs.items():
+        best_for_file[key] = min(d, best_for_file.get(key, 1e9))
+    pairs = {k: d for k, d in pairs.items() if d <= best_for_file[k[1]] + MUTUAL_TOLERANCE}
+    results = []
+    for m in mats:
+        best = None
+        for (img, (eid, i)), d in pairs.items():
+            if img != m["image_index"]:
+                continue
             # pieces of the current outfit win ties
             key = (d - (2.0 if eid in current else 0.0), d)
-            if d <= threshold and (best is None or key < best[0]):
+            if best is None or key < best[0]:
                 best = (key, eid, i, d)
         if best is None:
             continue

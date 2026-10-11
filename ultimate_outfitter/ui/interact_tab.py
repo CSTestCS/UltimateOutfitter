@@ -476,8 +476,7 @@ class InteractTab(QWidget):
             wet = False
         nums = self.preview["numbers"]
         self.viewport.call("setWet", {"on": wet, "strength": strength or 1.0,
-                                      "thinOpacity": nums["wet thin opacity"],
-                                      "thin": material_rules.thin_keywords(self.character)})
+                                      "thinOpacity": nums["wet thin opacity"]})
         self._apply_physics(strength if wet else 0.0)
 
     def _wet_text(self) -> str:
@@ -509,8 +508,8 @@ class InteractTab(QWidget):
             return
         outfit = self.character.shown_outfit() or {}
         removed = outfit.get("removed", [])
-        words = material_rules.removed_keywords(self.character, removed)
-        self.viewport.call("setHidden", {"entries": [r.get("entry_id") for r in removed], "words": words})
+        # only parts whose texture matched a removed piece are hidden - never guesses from names
+        self.viewport.call("setHidden", {"entries": [r.get("entry_id") for r in removed]})
 
     def edit_preview_settings(self):
         path = preview_settings.ensure(self.state.library)
