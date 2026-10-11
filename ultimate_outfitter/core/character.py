@@ -183,12 +183,46 @@ DEFAULT_GEN_SETTINGS = {
 }
 
 
+_OPEN: dict[str, "Character"] = {}
+
+
 class Character:
     def __init__(self, library: Library, profile_path: Path):
         self.library = library
         self.path = Path(profile_path)
         self.dir = self.path.parent
+        self._load()
+
+    @classmethod
+    def open(cls, library: Library, profile_path: Path | str) -> "Character":
+        """The shared Character for a profile.
+
+        Every tab works on the same object, so one tab can never save an older copy of the profile over
+        changes made in another. The profile is re-read if the file was changed outside this object.
+        """
+        path = Path(profile_path)
+        key = str(path.resolve())
+        ch = _OPEN.get(key)
+        if ch is None or ch.library is not library:
+            ch = cls(library, path)
+            _OPEN[key] = ch
+        elif ch._file_stamp() != ch._stamp:
+            ch._load()
+        return ch
+
+    def _file_stamp(self):
+        try:
+            st = self.path.stat()
+            return st.st_mtime_ns, st.st_size
+        except OSError:
+            return None
+
+    def reload(self) -> None:
+        self._load()
+
+    def _load(self) -> None:
         self.data: dict[str, Any] = json.loads(self.path.read_text(encoding="utf-8"))
+        self._stamp = self._file_stamp()
         self.data.setdefault("wardrobe", {})
         self.data.setdefault("dresser", [])
         self.data.setdefault("hamper", [])
@@ -201,6 +235,39 @@ class Character:
             gs.setdefault(k, v)
         self.data.setdefault("palette_scan", {"precision": 60, "min_coverage": 0.5,
                                               "image_colors": [], "matches": []})
+        self._link_outfits()
+
+    def _link_outfits(self) -> None:
+        """Give every outfit an id and make current_outfit the same dict as its history entry."""
+        hist = self.data["outfit_history"]
+        for o in hist:
+            o.setdefault("id", new_id())
+        cur = self.data.get("current_outfit")
+        if cur:
+            same = next((o for o in hist if cur.get("id") and o.get("id") == cur.get("id")), None)
+            if same is None:
+                same = next((o for o in reversed(hist) if o.get("date") == cur.get("date")
+                             and [p.get("entry_id") for p in o.get("pieces", [])]
+                             == [p.get("entry_id") for p in cur.get("pieces", [])]), None)
+            if same is not None:
+                same.update(cur)
+                same.setdefault("id", new_id())
+                self.data["current_outfit"] = same
+            else:
+                cur.setdefault("id", new_id())
+
+    # -- outfits ---------------------------------------------------------------
+    def outfit_by_id(self, outfit_id: str | None) -> dict | None:
+        if not outfit_id:
+            return None
+        cur = self.data.get("current_outfit")
+        if cur and cur.get("id") == outfit_id:
+            return cur
+        return next((o for o in self.data["outfit_history"] if o.get("id") == outfit_id), None)
+
+    def shown_outfit(self) -> dict | None:
+        """The outfit shown in the Interact tab: the chosen day's, or the current one."""
+        return self.outfit_by_id(self.data.get("shown_outfit")) or self.data.get("current_outfit")
 
     # -- creation / persistence ----------------------------------------------
     @classmethod
@@ -228,10 +295,11 @@ class Character:
         }
         path = folder / "profile.json"
         write_json_atomic(path, data)
-        return cls(library, path)
+        return cls.open(library, path)
 
     def save(self) -> None:
         write_json_atomic(self.path, self.data)
+        self._stamp = self._file_stamp()
 
     @property
     def name(self) -> str:
@@ -724,7 +792,7 @@ def list_characters(library: Library) -> list[Character]:
     out = []
     for path in library.list_characters():
         try:
-            out.append(Character(library, path))
+            out.append(Character.open(library, path))
         except (OSError, ValueError):
             continue
     return out

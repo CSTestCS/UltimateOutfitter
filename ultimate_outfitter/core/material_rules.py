@@ -96,7 +96,7 @@ def load_overrides(character) -> dict[str, str]:
 
 def thin_keywords(character) -> list[str]:
     """Material-name keywords for the thin pieces of the current outfit."""
-    outfit = character.data.get("current_outfit") or {}
+    outfit = character.shown_outfit() or {}
     wardrobe = character.data.get("wardrobe", {})
     items = character.library.items
     thin, thick_generic = [], set()

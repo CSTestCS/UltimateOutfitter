@@ -147,7 +147,7 @@ def match_wardrobe(character, vrm_path: Path | str, threshold: float = MATCH_THR
     if not mats:
         return []
     wardrobe = character.data.get("wardrobe", {})
-    current = {p.get("entry_id") for p in (character.data.get("current_outfit") or {}).get("pieces", [])}
+    current = {p.get("entry_id") for p in (character.shown_outfit() or {}).get("pieces", [])}
     candidates = []
     for eid, e in wardrobe.items():
         for i, rel in enumerate(e.get("files") or [e.get("file")]):

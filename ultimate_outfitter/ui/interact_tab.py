@@ -56,9 +56,14 @@ class InteractTab(QWidget):
         self.player.setMaximumWidth(160)
         self.player.setToolTip("What the character calls you")
         self.player.textChanged.connect(lambda t: self.conv and setattr(self.conv, "player", t or "you"))
+        self.day_combo = QComboBox()
+        self.day_combo.setToolTip("Which day's outfit is shown (the newest day is shown after planning a new one)")
+        self.day_combo.currentIndexChanged.connect(self._day_chosen)
         top = QHBoxLayout()
         top.addWidget(QLabel("Character:"))
         top.addWidget(self.char_combo, 1)
+        top.addWidget(QLabel("Outfit:"))
+        top.addWidget(self.day_combo, 1)
         top.addWidget(QLabel("Your name:"))
         top.addWidget(self.player)
 
@@ -277,7 +282,7 @@ class InteractTab(QWidget):
             self.loaded_vrm = None
             self._update_stack()
             return
-        self.character = Character(self.state.library, Path(path))
+        self.character = Character.open(self.state.library, Path(path))
         self.match_info = ""
         self.conv = Conversation(self.character, self.player.text() or "you")
         self.expr = expressions.load(self.character)
@@ -286,16 +291,47 @@ class InteractTab(QWidget):
         self.time_combo.setCurrentIndex(max(0, self.time_combo.findData(vs.get("time", "auto"))))
         self.time_combo.blockSignals(False)
         self.bg_combo.setCurrentIndex(max(0, self.bg_combo.findData(vs.get("background", {}).get("mode", "sky"))))
+        self._fill_days()
         self._show_outfit()
         self._render_log()
         self._sync_view(reload_model=True)
+
+    def _fill_days(self):
+        ch = self.character
+        self.day_combo.blockSignals(True)
+        self.day_combo.clear()
+        if ch:
+            cur = (ch.data.get("current_outfit") or {}).get("id")
+            for o in reversed(ch.data.get("outfit_history", [])):
+                c = o.get("context", {})
+                label = f"{o.get('date', '?')} — {c.get('activity', '')}"
+                if o.get("id") == cur:
+                    label += " (current)"
+                self.day_combo.addItem(label, o.get("id"))
+            shown = (ch.shown_outfit() or {}).get("id")
+            self.day_combo.setCurrentIndex(max(0, self.day_combo.findData(shown)))
+        self.day_combo.blockSignals(False)
+
+    def _day_chosen(self, _idx):
+        ch = self.character
+        if not ch:
+            return
+        oid = self.day_combo.currentData()
+        if oid and oid != (ch.data.get("current_outfit") or {}).get("id"):
+            ch.data["shown_outfit"] = oid
+        else:
+            ch.data.pop("shown_outfit", None)
+        ch.save()
+        self.match_info = ""
+        self._show_outfit()
+        self._sync_view()
 
     # ------------------------------------------------------------- viewer
     def _vrm_rel(self) -> str | None:
         ch = self.character
         if not ch:
             return None
-        outfit = ch.data.get("current_outfit") or {}
+        outfit = ch.shown_outfit() or {}
         return outfit.get("vrm") or ch.data.get("viewer", {}).get("default_vrm")
 
     def _update_stack(self):
@@ -561,13 +597,9 @@ class InteractTab(QWidget):
         dest = unique_path(folder / f"{safe_name(Path(path).stem)}.vrm")
         shutil.copy2(path, dest)
         rel = dest.relative_to(ch.dir).as_posix()
-        outfit = ch.data.get("current_outfit")
+        outfit = ch.shown_outfit()
         if outfit:
-            outfit["vrm"] = rel
-            for h in reversed(ch.data.get("outfit_history", [])):
-                if h.get("date") == outfit.get("date"):
-                    h["vrm"] = rel
-                    break
+            outfit["vrm"] = rel      # the same dict as the outfit's history entry
         vs = ch.data.setdefault("viewer", {})
         vs["default_vrm"] = rel  # used for outfits without a model of their own
         ch.save()
@@ -578,7 +610,7 @@ class InteractTab(QWidget):
         ch = self.character
         if not ch:
             return
-        outfit = ch.data.get("current_outfit") or {}
+        outfit = ch.shown_outfit() or {}
         outfit.pop("vrm", None)
         ch.data.get("viewer", {}).pop("default_vrm", None)
         ch.save()
@@ -632,7 +664,7 @@ class InteractTab(QWidget):
     # ------------------------------------------------------------- status
     def _show_outfit(self):
         ch = self.character
-        outfit = ch.data.get("current_outfit")
+        outfit = ch.shown_outfit()
         if outfit and outfit.get("preview"):
             self.outfit_img.setPixmap(thumb_cache.get(ch.dir / outfit["preview"], 520))
         else:
@@ -641,7 +673,7 @@ class InteractTab(QWidget):
 
     def _show_status(self):
         st = self.conv.state
-        outfit = self.character.data.get("current_outfit") or {}
+        outfit = self.character.shown_outfit() or {}
         pieces = ", ".join(p["name"] for p in outfit.get("pieces", [])) or "no outfit chosen yet"
         issues = [i for i, _ in self.conv.outfit_issues() if i != "nothing"]
         labels = {"underdressed": "underdressed", "cold": "too cold", "hot": "too warm", "formal": "overdressed",

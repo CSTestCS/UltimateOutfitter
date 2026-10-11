@@ -160,12 +160,17 @@ Profiles are saved automatically and reopen with the app. *Open profile file…*
 * If the character simply doesn't own something (e.g. no tops, shoes or swimwear), laundry wouldn't help. The app
   then does its best with what exists, even if that's only underwear, and lists the missing parts above the outfit.
   Complete outfits are always preferred when possible.
+* **Edit this outfit…** (on the *Current outfit & history* page) changes the shown outfit, current or past:
+  *Add piece…*, *Replace…* (offers the same kind of piece first) and *Remove*. Added pieces must be clean, so they
+  come from the dresser and go to the hamper. Removed pieces stay in the hamper: editing never puts anything back
+  in the dresser. The outfit's contact sheet is redrawn.
 
 ## F. Interact
 
 Pick a character to see them in a large **3D viewport** and chat with them. Planning a new outfit of the day in
 the Outfit Manager copies its answers (mood, activity, setting and weather) into the Interact tab and starts a
-fresh chat.
+fresh chat. The **Outfit** box picks which day's outfit is shown (the newest day is shown again after you plan a
+new one). The 3D model, the material effects and the character's comments follow the chosen outfit.
 
 ### 3D viewport (VRoid)
 

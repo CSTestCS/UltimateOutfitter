@@ -4,14 +4,16 @@ from __future__ import annotations
 import random
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
                                QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-                               QListWidget, QMessageBox, QPushButton, QRadioButton, QScrollArea,
+                               QListWidget, QListWidgetItem, QMessageBox, QPushButton, QRadioButton, QScrollArea,
                                QSplitter, QTabWidget, QVBoxLayout, QWidget)
 
 from ..core.categories import ACTIVITIES, SLOTS, WEATHER
 from ..core.character import Character, list_characters
-from ..core.outfit import MOODS, REJECT_REASONS, SETTINGS, DayContext, NoOutfitPossible, OutfitSession, do_laundry
+from ..core.outfit import (MOODS, REJECT_REASONS, SETTINGS, DayContext, NoOutfitPossible, OutfitSession, do_laundry,
+                           edit_outfit)
 from .common import AppState, Gallery, thumb_cache
 
 
@@ -88,6 +90,127 @@ class RejectDialog(QDialog):
         return self.group.checkedButton().property("key")
 
 
+class PickPieceDialog(QDialog):
+    """Pick a clean piece from the dresser (optionally limited to one slot)."""
+
+    def __init__(self, parent, character: Character, slot: str | None = None, exclude=(), title="Add a piece"):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(720, 520)
+        self.character = character
+        self.slot = slot
+        self.exclude = set(exclude)
+        self.gallery = Gallery(96)
+        self.gallery.itemDoubleClicked.connect(lambda *_: self.accept())
+        self.only_slot = QCheckBox(f"Only “{SLOTS.get(slot, slot)}” pieces" if slot else "")
+        self.only_slot.setChecked(bool(slot))
+        self.only_slot.setVisible(bool(slot))
+        self.only_slot.toggled.connect(self._fill)
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        lay = QVBoxLayout(self)
+        lay.addWidget(QLabel("Clean pieces in the dresser (worn pieces in the hamper need laundry first):"))
+        lay.addWidget(self.only_slot)
+        lay.addWidget(self.gallery, 1)
+        lay.addWidget(bb)
+        self._fill()
+
+    def _fill(self, *_):
+        self.gallery.clear()
+        w = self.character.data["wardrobe"]
+        entries = [w[e] for e in self.character.data["dresser"] if e in w and e not in self.exclude]
+        if self.slot and self.only_slot.isChecked():
+            entries = [e for e in entries if e["slot"] == self.slot]
+        order = {s: i for i, s in enumerate(SLOTS)}
+        entries.sort(key=lambda e: (e["slot"] != self.slot, order.get(e["slot"], 99), e["item_name"]))
+        for e in entries:
+            self.gallery.add(e["id"], e["item_name"], self.character.entry_path(e),
+                             tooltip=f"{SLOTS.get(e['slot'], e['slot'])}\n{'+'.join(e['palette_names'])}")
+
+    def chosen(self) -> str | None:
+        return self.gallery.current_key()
+
+
+class EditOutfitDialog(QDialog):
+    """Add, remove or replace pieces of a saved outfit."""
+
+    def __init__(self, parent, character: Character, outfit: dict):
+        super().__init__(parent)
+        self.setWindowTitle(f"Edit outfit — {outfit.get('date', '')}")
+        self.resize(560, 480)
+        self.character = character
+        self.original = [p["entry_id"] for p in outfit.get("pieces", [])]
+        self.ids = list(self.original)
+        self.list = QListWidget()
+        self.list.setIconSize(thumb_cache.get(character.image_path, 56).size())
+        b_add = QPushButton("Add piece…")
+        b_add.clicked.connect(self._add)
+        b_rep = QPushButton("Replace…")
+        b_rep.clicked.connect(self._replace)
+        b_rem = QPushButton("Remove")
+        b_rem.clicked.connect(self._remove)
+        side = QVBoxLayout()
+        for b in (b_add, b_rep, b_rem):
+            side.addWidget(b)
+        side.addStretch(1)
+        row = QHBoxLayout()
+        row.addWidget(self.list, 1)
+        row.addLayout(side)
+        note = QLabel("Removed pieces stay in the hamper; added pieces come from the dresser and go to the hamper.")
+        note.setWordWrap(True)
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        lay = QVBoxLayout(self)
+        lay.addLayout(row, 1)
+        lay.addWidget(note)
+        lay.addWidget(bb)
+        self._fill()
+
+    def _fill(self):
+        self.list.clear()
+        w = self.character.data["wardrobe"]
+        for eid in self.ids:
+            e = w.get(eid)
+            if not e:
+                continue
+            it = QListWidgetItem(QIcon(thumb_cache.get(self.character.entry_path(e), 56)),
+                                 f"{SLOTS.get(e['slot'], e['slot'])}: {e['item_name']} ({'+'.join(e['palette_names'])})")
+            it.setData(Qt.ItemDataRole.UserRole, eid)
+            self.list.addItem(it)
+
+    def _current(self) -> str | None:
+        it = self.list.currentItem()
+        return it.data(Qt.ItemDataRole.UserRole) if it else None
+
+    def _add(self):
+        dlg = PickPieceDialog(self, self.character, exclude=self.ids)
+        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.chosen():
+            self.ids.append(dlg.chosen())
+            self._fill()
+
+    def _replace(self):
+        eid = self._current()
+        if not eid:
+            QMessageBox.information(self, "Replace", "Select the piece to replace first.")
+            return
+        slot = self.character.data["wardrobe"][eid]["slot"]
+        dlg = PickPieceDialog(self, self.character, slot, exclude=self.ids, title="Replace with…")
+        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.chosen():
+            self.ids[self.ids.index(eid)] = dlg.chosen()
+            self._fill()
+
+    def _remove(self):
+        eid = self._current()
+        if eid:
+            self.ids.remove(eid)
+            self._fill()
+
+    def changes(self) -> tuple[list[str], list[str]]:
+        return ([e for e in self.original if e not in self.ids], [e for e in self.ids if e not in self.original])
+
+
 class OutfitTab(QWidget):
     def __init__(self, state: AppState):
         super().__init__()
@@ -156,8 +279,16 @@ class OutfitTab(QWidget):
         self.current_text.setWordWrap(True)
         self.history = QListWidget()
         self.history.currentRowChanged.connect(self._show_history)
+        self.displayed_outfit: dict | None = None
+        self.b_edit = QPushButton("Edit this outfit…")
+        self.b_edit.setToolTip("Add, remove or replace pieces (nothing goes back from the hamper to the dresser)")
+        self.b_edit.clicked.connect(self.edit_outfit)
+        self.current_title = QLabel("<b>Current outfit</b>")
         cur = QVBoxLayout()
-        cur.addWidget(QLabel("<b>Current outfit</b>"))
+        head = QHBoxLayout()
+        head.addWidget(self.current_title, 1)
+        head.addWidget(self.b_edit)
+        cur.addLayout(head)
         cur.addWidget(self.current_img)
         cur.addWidget(self.current_text)
         cur.addWidget(QLabel("<b>Outfit history</b>"))
@@ -199,7 +330,7 @@ class OutfitTab(QWidget):
             self.character = None
         else:
             from pathlib import Path
-            self.character = Character(self.state.library, Path(path))
+            self.character = Character.open(self.state.library, Path(path))
         if not keep_session:
             self.session = None
             self._render_proposal()
@@ -237,17 +368,42 @@ class OutfitTab(QWidget):
         self._show_outfit(ch.data.get("current_outfit"))
 
     def _show_outfit(self, outfit):
+        self.displayed_outfit = outfit
+        self.b_edit.setEnabled(bool(outfit))
+        is_current = bool(outfit and self.character and outfit is self.character.data.get("current_outfit"))
+        self.current_title.setText("<b>Current outfit</b>" if is_current or not outfit else "<b>Past outfit</b>")
         if not outfit:
             self.current_img.clear()
             self.current_text.setText("No outfit yet.")
             return
         if outfit.get("preview"):
             self.current_img.setPixmap(thumb_cache.get(self.character.dir / outfit["preview"], 420))
+        else:
+            self.current_img.clear()
         c = outfit.get("context", {})
         lines = [f"<b>{outfit['date']}</b> — {c.get('activity')}, mood {c.get('mood')}, {c.get('weather')}"]
         for p in outfit["pieces"]:
             lines.append(f"• {SLOTS.get(p['slot'], p['slot'])}: {p['name']} ({'+'.join(p['palettes'])})")
         self.current_text.setText("<br>".join(lines))
+
+    def edit_outfit(self):
+        ch, outfit = self.character, self.displayed_outfit
+        if not ch or not outfit:
+            return
+        dlg = EditOutfitDialog(self, ch, outfit)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        remove, add = dlg.changes()
+        if not remove and not add:
+            return
+        edit_outfit(ch, outfit, remove, add)
+        row = self.history.currentRow()
+        self.state.characters_changed.emit()   # refreshes the dresser / hamper here and the Interact tab
+        if row >= 0:
+            self.history.blockSignals(True)
+            self.history.setCurrentRow(row)
+            self.history.blockSignals(False)
+        self._show_outfit(outfit)
 
     def _show_history(self, row):
         hist = self.character.data.get("outfit_history", []) if self.character else []

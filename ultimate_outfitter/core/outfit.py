@@ -11,7 +11,7 @@ from PIL import Image
 
 from .categories import ACCESSORY_SLOTS, CATEGORY_BY_NAME, MULTI_SLOTS, SLOTS, WEATHER_WARMTH
 from .character import Character
-from .storage import unique_path
+from .storage import new_id, unique_path
 from .traits import cosine
 
 MOODS = {
@@ -94,6 +94,12 @@ class DayContext:
 
     def needed_warmth(self) -> int:
         return WEATHER_WARMTH.get(self.weather, 2)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "DayContext":
+        return cls(d.get("activity") or "Casual / errands", d.get("mood") or "Calm", d.get("weather") or "Mild",
+                   d.get("formality"), d.get("notes", ""), d.get("setting") or "Public",
+                   bool(d.get("underwear_only")))
 
     def to_dict(self) -> dict[str, Any]:
         return {"activity": self.activity, "mood": self.mood, "weather": self.weather,
@@ -445,7 +451,7 @@ class OutfitSession:
             if e not in data["hamper"]:
                 data["hamper"].append(e)
         outfit = {
-            "date": time.strftime("%Y-%m-%d %H:%M"), "context": self.context.to_dict(),
+            "id": new_id(), "date": time.strftime("%Y-%m-%d %H:%M"), "context": self.context.to_dict(),
             "pieces": [{"slot": self.slot_of(e), "entry_id": e,
                         "name": self.wardrobe[e]["item_name"],
                         "palettes": self.wardrobe[e]["palette_names"],
@@ -456,6 +462,7 @@ class OutfitSession:
             outfit["preview"] = preview
         data["current_outfit"] = outfit
         data["outfit_history"].append(outfit)
+        data.pop("shown_outfit", None)     # the Interact tab follows the new day
         self.character.save()
         return outfit
 
@@ -482,6 +489,47 @@ class OutfitSession:
         path = unique_path(folder / f"Outfit-{time.strftime('%Y-%m-%d')}.png")
         sheet.save(path)
         return path.relative_to(self.character.dir).as_posix()
+
+
+def outfit_piece(entry: dict) -> dict:
+    return {"slot": entry["slot"], "entry_id": entry["id"], "name": entry["item_name"],
+            "palettes": entry["palette_names"], "file": entry["file"]}
+
+
+def edit_outfit(character: Character, outfit: dict, remove: list[str] = (), add: list[str] = ()) -> dict:
+    """Change the pieces of a saved outfit.
+
+    Removed pieces stay where they are (a worn piece stays in the hamper - editing never returns
+    anything to the dresser). Added pieces must be clean: they move from the dresser to the hamper.
+    ``remove`` + ``add`` together replace a piece.
+    """
+    data = character.data
+    wardrobe = data["wardrobe"]
+    gone = set(remove)
+    pieces = [p for p in outfit.get("pieces", []) if p.get("entry_id") not in gone]
+    have = {p.get("entry_id") for p in pieces}
+    for eid in add:
+        e = wardrobe.get(eid)
+        if not e or eid in have:
+            continue
+        if eid in data["dresser"]:
+            data["dresser"].remove(eid)
+        if eid not in data["hamper"]:
+            data["hamper"].append(eid)
+        pieces.append(outfit_piece(e))
+        have.add(eid)
+    order = {s: i for i, s in enumerate(SLOTS)}
+    pieces.sort(key=lambda p: order.get(p.get("slot"), len(order)))
+    outfit["pieces"] = pieces
+    outfit["edited"] = time.strftime("%Y-%m-%d %H:%M")
+    session = OutfitSession(character, DayContext.from_dict(outfit.get("context", {})))
+    preview = session.render_preview([p["entry_id"] for p in pieces if p["entry_id"] in wardrobe])
+    if preview:
+        outfit["preview"] = preview
+    else:
+        outfit.pop("preview", None)
+    character.save()
+    return outfit
 
 
 def do_laundry(character: Character) -> int:

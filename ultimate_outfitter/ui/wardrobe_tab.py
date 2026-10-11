@@ -368,7 +368,7 @@ class WardrobeTab(QWidget):
             self._show_character()
             return
         try:
-            self.character = Character(self.state.library, Path(key))
+            self.character = Character.open(self.state.library, Path(key))
         except (OSError, ValueError) as exc:
             QMessageBox.critical(self, "Character", f"Could not open profile: {exc}")
             self.character = None

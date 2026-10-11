@@ -633,3 +633,52 @@ def test_extra_palette_on_single_colour_item_adds_pattern(lib, tmp_path):
     assert info.get("pattern")
     cols = {tuple(px) for px in out[out[..., 3] > 0][:, :3]}
     assert (0xB0, 0x10, 0x10) in cols and (0x10, 0x30, 0xC0) in cols
+
+
+def test_shared_character_and_shown_outfit(lib, tmp_path):
+    import time as _time
+    ch = _wardrobe_char(lib, tmp_path, ["Underwear Bottoms", "Bras", "Shirts", "Pants", "Shoes"])
+    assert Character.open(lib, ch.path) is ch          # every tab shares one object
+    outfits = []
+    for _ in range(2):
+        do_laundry(ch)
+        s = OutfitSession(ch, DayContext("Casual / errands", "Calm", "Warm"))
+        s.build(allow_incomplete=True)
+        for e in s.in_use():
+            s.approve(e)
+        outfits.append(s.finalize())
+    first, second = outfits
+    assert first["id"] != second["id"] and ch.shown_outfit() is second
+    ch.data["shown_outfit"] = first["id"]
+    assert ch.shown_outfit() is first
+    ch.data["shown_outfit"] = second["id"]
+    ch.save()
+    # reloaded from disk: current_outfit is the same dict as its history entry
+    again = Character(lib, ch.path)
+    assert again.data["current_outfit"] is again.data["outfit_history"][-1]
+    again.data["current_outfit"]["vrm"] = "Models/x.vrm"
+    assert again.data["outfit_history"][-1]["vrm"] == "Models/x.vrm"
+    _time.sleep(0.01)
+    again.save()
+    # a change made elsewhere is picked up instead of being overwritten
+    assert Character.open(lib, ch.path) is ch and ch.data["current_outfit"].get("vrm") == "Models/x.vrm"
+
+
+def test_edit_outfit_keeps_hamper(lib, tmp_path):
+    from ultimate_outfitter.core.outfit import edit_outfit
+    ch = _wardrobe_char(lib, tmp_path, ["Underwear Bottoms", "Bras", "Shirts", "Shirts", "Pants", "Shoes"])
+    s = OutfitSession(ch, DayContext("Casual / errands", "Calm", "Warm"))
+    s.build(allow_incomplete=True)
+    for e in s.in_use():
+        s.approve(e)
+    outfit = s.finalize()
+    worn = [p["entry_id"] for p in outfit["pieces"]]
+    spare = next(e for e in ch.data["dresser"])
+    hamper_before = set(ch.data["hamper"])
+    edit_outfit(ch, outfit, remove=[worn[0]], add=[spare])
+    ids = [p["entry_id"] for p in outfit["pieces"]]
+    assert worn[0] not in ids and spare in ids
+    assert worn[0] in ch.data["hamper"] and worn[0] not in ch.data["dresser"]   # nothing back to the dresser
+    assert spare in ch.data["hamper"] and spare not in ch.data["dresser"]
+    assert hamper_before <= set(ch.data["hamper"])
+    assert ch.data["outfit_history"][-1] is outfit and outfit.get("preview")

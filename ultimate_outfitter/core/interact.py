@@ -504,7 +504,7 @@ class Conversation:
         return ranked[0][0]
 
     def outfit_pieces(self) -> list[dict]:
-        outfit = self.character.data.get("current_outfit") or {}
+        outfit = self.character.shown_outfit() or {}
         return outfit.get("pieces", [])
 
     def _piece_label(self, p: dict) -> str:
