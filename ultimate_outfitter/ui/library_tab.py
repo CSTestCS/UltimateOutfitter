@@ -485,6 +485,21 @@ class PatternDialog(QDialog):
         self.cutaway.setCurrentIndex(max(0, self.cutaway.findData(pattern.get("cutaway", "none"))))
         self.cutaway.setToolTip("A cutaway makes the garment transparent where the mask is dark / transparent "
                                 "(lace, mesh, fishnet, eyelets...).")
+        old_attrs = pattern.get("attrs", {})
+        self.colours = QComboBox()
+        self.colours.addItem("Exact palette colours (locked, default)", "exact")
+        self.colours.addItem("Smooth blend of the palette colours (gradients)", "smooth")
+        self.colours.addItem("The pattern's own colours", "own")
+        self.colours.setCurrentIndex(max(0, self.colours.findData(old_attrs.get("colors", "exact"))))
+        self.colours.setToolTip("Exact: the print uses only the palette's exact colours (when the wardrobe locks "
+                                "colours). Smooth: the pattern's light / dark values blend smoothly between the "
+                                "palette colours, e.g. for gradients. Own: the print keeps its own colours.")
+        self.material = QComboBox()
+        self.material.addItem("From palette / item names (default)", "auto")
+        self.material.addItem("Always silk", "silk")
+        self.material.addItem("Always metallic", "metallic")
+        self.material.setCurrentIndex(max(0, self.material.findData(old_attrs.get("material", "auto"))))
+        self.material.setToolTip("Silk / metallic: wherever this print lands, the 3D preview makes it shiny")
         self.mask_label = QLabel()
         self.mask_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         b_mask = QPushButton("Choose cutaway mask…")
@@ -503,6 +518,10 @@ class PatternDialog(QDialog):
         f = QFormLayout()
         f.addRow("Name", self.name_edit)
         left.addLayout(f)
+        left.addWidget(QLabel("<b>Colours</b>"))
+        left.addWidget(self.colours)
+        left.addWidget(QLabel("<b>Material</b>"))
+        left.addWidget(self.material)
         left.addWidget(QLabel("<b>Cutaway</b>"))
         left.addWidget(self.cutaway)
         left.addWidget(b_mask)
@@ -544,6 +563,7 @@ class PatternDialog(QDialog):
 
     def pattern_data(self) -> dict:
         traits, attrs = evaluate_pattern(self.form.answers())
+        attrs = dict(attrs, colors=self.colours.currentData(), material=self.material.currentData())
         return {"name": self.name_edit.text().strip() or Path(self.image_path).stem,
                 "answers": self.form.answers(), "traits": traits, "attrs": attrs,
                 "cutaway": self.cutaway.currentData()}

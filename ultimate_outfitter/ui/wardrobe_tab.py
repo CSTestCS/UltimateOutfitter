@@ -278,6 +278,10 @@ class WardrobeTab(QWidget):
         gl.addLayout(gf)
         b_build = QPushButton("Build / update wardrobe (all items)")
         b_build.clicked.connect(lambda: self.build(new_only=False))
+        b_more = QPushButton("Add to wardrobe (another batch)")
+        b_more.setToolTip("Like Build, but adds a new batch of pieces on top of the existing wardrobe instead of "
+                          "only filling it up (exact duplicates are skipped)")
+        b_more.clicked.connect(lambda: self.build(new_only=False, extra=True))
         self.b_new = QPushButton("Scan for new clothing items")
         self.b_new.clicked.connect(lambda: self.build(new_only=True))
         b_clear = QPushButton("Clear wardrobe…")
@@ -287,6 +291,7 @@ class WardrobeTab(QWidget):
         b_manual.setToolTip("Choose an item, its palettes, print and options yourself, preview it and add it")
         b_manual.clicked.connect(self.add_manual_piece)
         gl.addWidget(b_build)
+        gl.addWidget(b_more)
         gl.addWidget(self.b_new)
         gl.addWidget(b_manual)
         gl.addWidget(b_clear)
@@ -626,7 +631,7 @@ class WardrobeTab(QWidget):
         run_with_progress(self, "Scanning palettes", ch.scan_palettes, self.precision.value(),
                           self.coverage.value() / 100, self.n_colors.value(), on_done=done)
 
-    def build(self, new_only: bool):
+    def build(self, new_only: bool, extra: bool = False):
         ch = self.character
         if not ch:
             return
@@ -638,7 +643,7 @@ class WardrobeTab(QWidget):
         if new_only and not ids:
             QMessageBox.information(self, "Scan for new items", "No new clothing items since the last build.")
             return
-        plan = ch.plan_wardrobe(ids)
+        plan = ch.plan_wardrobe(ids, extra=extra)
         if not plan:
             QMessageBox.information(self, "Build", "Nothing new to create: no items reach the minimum match, "
                                     "or every recolour already exists.")
@@ -651,7 +656,7 @@ class WardrobeTab(QWidget):
         multi = sum(len(p["palettes"]) > 1 for p in plan)
         printed = sum(p["pattern"] is not None for p in plan)
         lines = "\n".join(f"  {cat}: {n}" for cat, n in sorted(summary.items()))
-        if QMessageBox.question(self, "Build wardrobe",
+        if QMessageBox.question(self, "Add to wardrobe" if extra else "Build wardrobe",
                                 f"Create {len(plan)} pieces ({multi} mixing palettes, {printed} with a print):\n\n"
                                 f"{lines}\n\nin {ch.wardrobe_dir}?\n\n(Change the settings or the random seed "
                                 "for a different selection.)") != QMessageBox.StandardButton.Yes:

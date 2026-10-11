@@ -66,6 +66,11 @@ The app never overwrites files it creates automatically. If a name is taken, it 
 * **Patterns:** upload any image, then answer a few questions about it: the kind of pattern, how bold it is, its
   scale, formality, setting, which kinds of items it suits, and whether it goes on the main fabric or the whole
   item. The wardrobe creator uses these answers to put suitable prints on suitable pieces.
+  * **Colours:** *Exact palette colours* (default) prints only the palette's exact colours when the wardrobe
+    locks colours. *Smooth blend of the palette colours* lets the print blend smoothly between the palette
+    colours, for gradients. *The pattern's own colours* keeps the print's colours as they are.
+  * **Material:** *Always silk* or *Always metallic* makes the print shiny in the 3D preview wherever it lands
+    (its shine mask is saved with the piece), whatever the palette or item is called.
   * **Cutaway:** a pattern can cut holes in the garment, for lace, mesh or fishnet. Either the pattern's own
     transparency is used, or a separate black/white mask (black = cut away).
 
@@ -140,6 +145,10 @@ The app never overwrites files it creates automatically. If a name is taken, it 
    (automatic from names, none, or metallic / silk on a chosen palette), whether colours are locked to the exact
    palette, and whether a print may be added for an unused palette. A live preview shows the result. The piece is
    saved and named like generated ones and goes into the dresser.
+
+   **Add to wardrobe (another batch)** works like *Build*, but instead of only topping the wardrobe up to the
+   planned size it adds a whole new batch on top of what the character already owns, using the same settings.
+   Exact duplicates of existing pieces are skipped.
 
 4. **Scan for new clothing items** processes only the items added since the last build. Each suitable new
    item gets one version, and great matches sometimes get two. *Build / update* skips

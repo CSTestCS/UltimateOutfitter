@@ -974,3 +974,53 @@ def test_print_scale_varies_but_is_stable(lib, tmp_path):
     # the grey shirt never gets grey dots: printed pixels inside the shirt are not the base grey
     body = arr[..., 3] > 0
     assert ((big[..., :3] != (128, 128, 128)).any(axis=-1) & body).any()
+
+
+def test_add_to_wardrobe_plans_another_batch(lib, tmp_path):
+    for name, col in (("Teal", "#108080"), ("Sun", "#F0C020"), ("Ink", "#202040"), ("Rose", "#E07090")):
+        lib.add_palette(name, [col])
+    ch = _wardrobe_char(lib, tmp_path, ["Shirts", "Shirts", "Pants", "Shoes"])
+    ch.scan_palettes(0, 0.0)                              # accept every palette
+    before = set(ch.existing_combos())
+    assert ch.plan_wardrobe() == [] or len(ch.plan_wardrobe()) < len(ch.plan_wardrobe(extra=True))
+    extra = ch.plan_wardrobe(extra=True)
+    assert extra
+    keys = {ch._key(p["item"]["id"], [q["id"] for q in p["palettes"]], p["pattern"]["id"] if p["pattern"] else None)
+            for p in extra}
+    assert not keys & before                               # never an exact duplicate
+    n = len(ch.data["wardrobe"])
+    ch.build_wardrobe(plan=extra)
+    assert len(ch.data["wardrobe"]) == n + len(extra)
+
+
+def test_pattern_colour_and_material_options(lib, tmp_path):
+    greys = lib.add_palette("Greys", ["#F0F0F0", "#808080", "#202020"])
+    arr = np.zeros((48, 48, 4), np.uint8)
+    arr[4:44, 4:44] = (128, 128, 128, 255)
+    Image.fromarray(arr, "RGBA").save(tmp_path / "base.png")
+    grad = np.zeros((32, 32, 4), np.uint8)
+    grad[..., 3] = 255
+    grad[..., 0] = np.linspace(0, 255, 32, dtype=np.uint8)[None, :]     # a red gradient
+    Image.fromarray(grad, "RGBA").save(tmp_path / "grad.png")
+    ans = _first_answers("Shirts")
+    t, a = categories.evaluate_answers("Shirts", ans)
+    shirt = lib.add_item(tmp_path / "base.png", "Tee", "Shirts", ans, t, a)
+    ch = _wardrobe_char(lib, tmp_path, [], build=False)
+    body = arr[..., 3] > 0
+    exact_cols = {(0xF0, 0xF0, 0xF0), (0x80, 0x80, 0x80), (0x20, 0x20, 0x20)}
+
+    def render(**attrs):
+        pat = lib.add_pattern(tmp_path / "grad.png", f"Grad-{len(lib.patterns)}", {}, {},
+                              {"repeats": 2, "placement": "whole", **attrs})
+        shine: list = []
+        out = ch.render_piece(shirt, [greys], pat, {}, shine_out=shine, print_scale=1.0)[0]
+        return {tuple(px) for px in out[body][:, :3]}, shine
+
+    exact, _ = render()
+    assert exact <= exact_cols                              # locked: only the palette's exact colours
+    smooth, _ = render(colors="smooth")
+    assert len(smooth - exact_cols) > 3                     # a gradient between the palette colours
+    own, _ = render(colors="own")
+    assert any(r > g + 40 for r, g, b in own)               # keeps the pattern's own red
+    _, shine = render(material="silk")
+    assert shine[0] and shine[0][0][1] == "silk" and shine[0][0][0].any()

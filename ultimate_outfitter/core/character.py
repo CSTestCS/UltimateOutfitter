@@ -442,7 +442,7 @@ class Character:
         excluded = set(self.data.get("gen_settings", {}).get("excluded_patterns", []))
         return [p for p in self.library.patterns.values() if p["id"] not in excluded]
 
-    def plan_wardrobe(self, item_ids: list[str] | None = None) -> list[dict]:
+    def plan_wardrobe(self, item_ids: list[str] | None = None, extra: bool = False) -> list[dict]:
         """Decide which pieces to make.
 
         Returns a list of {"item", "score", "palettes", "pattern"} dicts. By default the
@@ -451,6 +451,8 @@ class Character:
         for good personality matches, most pieces use a single favourite palette, a few mix
         palettes and some get a print. ``item_ids`` restricts planning to those items
         (used when scanning for new items: each new suitable item gets one or two versions).
+        ``extra`` plans another full batch on top of the existing wardrobe ("Add to wardrobe"): the
+        usual amounts per slot, ignoring what is already owned, but never an exact duplicate.
         """
         gs = {**DEFAULT_GEN_SETTINGS, **self.data.get("gen_settings", {})}
         palettes = self.matched_palettes()
@@ -461,7 +463,7 @@ class Character:
         patterns = self._usable_patterns()
         if gs["exhaustive"]:
             return self._plan_exhaustive(ranked, palettes, existing, gs)
-        rng = random.Random(f"{gs['seed']}-{len(self.data['wardrobe'])}-{item_ids is None}")
+        rng = random.Random(f"{gs['seed']}-{len(self.data['wardrobe'])}-{item_ids is None}-{extra}")
 
         # candidate items per slot, limited per category
         by_slot: dict[str, list[tuple[dict, float]]] = {}
@@ -473,6 +475,8 @@ class Character:
         owned_per_item: dict[str, int] = {}
         owned_per_slot: dict[str, int] = {}
         for e in self.data["wardrobe"].values():
+            if extra:
+                break   # a new batch: what is owned doesn't limit it (exact duplicates are still skipped)
             owned_per_item[e["item_id"]] = owned_per_item.get(e["item_id"], 0) + 1
             owned_per_slot[e["slot"]] = owned_per_slot.get(e["slot"], 0) + 1
 
@@ -589,7 +593,15 @@ class Character:
                                                 [p.get("kind", "varied") for p in palettes],
                                                 palette_masks_out=pal_masks, lock=lock)
 
-        def print_pattern(pat, cut, colors, region_of, placement_whole, repeats, g=None):
+        material_masks: list[list] = [[] for _ in outs]   # pattern parts that are always silk / metallic
+
+        def print_pattern(pat, cut, colors, region_of, placement_whole, repeats, g=None, pdict=None):
+            pattrs = (pdict or {}).get("attrs", {})
+            # "exact": the palette's exact colours (when locked); "smooth": a smooth blend of the palette's
+            # colours (gradients); "own": the pattern image's own colours
+            mode = pattrs.get("colors", "exact")
+            material = pattrs.get("material") if pattrs.get("material") in ("silk", "metallic") else None
+            rigid = lock and mode == "exact"
             for i, out in enumerate(outs):
                 region = region_of(i)
                 if not region.any():
@@ -599,7 +611,8 @@ class Character:
                 # never shrink a print below ~8 px per tile, or it disappears / loses its holes
                 scale = max(0.05, width / max(repeats, 1) / pat.shape[1], 8 / max(pat.shape[1], 1))
                 before = out.copy()
-                opts = dict(scale=scale, antialias=not lock, palette=colors, blend="replace" if lock else "shaded",
+                opts = dict(scale=scale, antialias=not rigid, palette=None if mode == "own" else colors,
+                            blend="replace" if (rigid or mode != "exact") else "shaded",
                             cutaway=cut, offset=(int(xs[0]), 0))
                 outs[i] = apply_pattern(out, region, pat, **opts)
                 # where the print actually lands (also where it happens to repeat the colour beneath)
@@ -607,10 +620,13 @@ class Character:
                 probe[..., :3] = (1, 254, 3)
                 coverage = np.any(apply_pattern(probe, region, pat, **opts)[..., :3] != probe[..., :3], axis=-1)
                 coverage &= region
-                if lock and coverage.any():
+                if rigid and coverage.any():
                     outs[i] = quantize_to_palette(outs[i], coverage, colors)
-                # never print a palette colour on top of itself
-                outs[i] = avoid_same_colors(outs[i], before, coverage, colors)
+                if mode == "exact":
+                    # never print a palette colour on top of itself
+                    outs[i] = avoid_same_colors(outs[i], before, coverage, colors)
+                if material and coverage.any():
+                    material_masks[i].append((coverage & (outs[i][..., 3] >= MIN_AUTO_ALPHA), material))
                 printed = np.any(outs[i][..., :3] != before[..., :3], axis=-1) & region
                 if g is not None and pal_masks:
                     for gg in range(len(pal_masks[i])):
@@ -631,7 +647,7 @@ class Character:
                      or pattern.get("attrs", {}).get("placement") == "whole")
             print_pattern(pat, cut, palettes[g]["colors"],
                           lambda i: masks[i] if whole or not primaries[i].any() else primaries[i] & masks[i],
-                          whole, vary(pattern.get("attrs", {}).get("repeats", 6)), g)
+                          whole, vary(pattern.get("attrs", {}).get("repeats", 6)), g, pattern)
         # palettes that coloured nothing (image has too few colours) get a pattern instead
         allow_auto, auto_pattern = auto_pattern, None
         if pal_masks and allow_auto:
@@ -652,7 +668,7 @@ class Character:
                         pat, cut, repeats = builtin_pattern(kind), None, 8
                 base = [pm[0].copy() for pm in pal_masks]
                 print_pattern(pat, cut, palettes[g]["colors"], lambda i, b=base: b[i] & masks[i], False,
-                              vary(repeats), g)
+                              vary(repeats), g, auto_pattern)
         if info_out is not None:
             info_out["pattern"] = auto_pattern
         # metallic / silk: masks only (the 3D preview draws the shine)
@@ -669,6 +685,8 @@ class Character:
                 m = pal_masks[i][g] & (outs[i][..., 3] >= MIN_AUTO_ALPHA) if pal_masks else None
                 if m is not None and m.any():
                     applied.append((m, kind))
+            if shine != "none":
+                applied += [(m, kind) for m, kind in material_masks[i] if m.any()]
             if shine_out is not None:
                 shine_out.append(applied)
         return outs
