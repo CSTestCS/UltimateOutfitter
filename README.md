@@ -168,17 +168,16 @@ Profiles are saved automatically and reopen with the app. *Open profile file…*
   Complete outfits are always preferred when possible.
 * **Dress or top + bottoms:** if you reject every dress, the outfit switches to a top and bottoms; if you reject
   every top, it switches to a dress. Tights / legwear are considered with the new combination. Rejecting bottoms
-  never switches, and a switch never replaces a piece you have already approved (e.g. approved bottoms keep the
-  outfit a top + bottoms). Shopping follows the same rule. One-piece swimwear / swim tops and sleepwear work the
-  same way.
+  never switches, and rejecting never replaces a piece you have already approved (e.g. approved bottoms keep the
+  outfit a top + bottoms). One-piece swimwear / swim tops and sleepwear work the same way.
 * **Shop:** when you reject a piece and nothing else in the dresser fits, you can choose **Shop** as well as laundry
   or leaving the slot empty. The shop also appears when the wardrobe has nothing for an essential piece: there is a
   *Shop for missing pieces…* button above the outfit, and a *Shop* choice when no outfit can be made. The shop
   suggests a random piece that suits the day, with a preview. It is any clothing item for that slot from your
   collection, in random palettes from your library, sometimes with a print. It ignores the character's personality
-  and wardrobe rules, but palettes you rejected as clashing for that slot are avoided. Shopping for a dress may
-  also offer tops or bottoms, and shopping for a top may offer dresses (not when shopping for bottoms, or when
-  part of the outfit is already approved); buying one switches the outfit to that combination. Press **Shop** again for
+  and wardrobe rules, but palettes you rejected as clashing for that slot are avoided. Shopping for a dress also
+  offers tops and bottoms, and shopping for a top also offers dresses, even when other pieces are approved
+  (shopping for bottoms offers only bottoms). Buying one switches the outfit to that combination. Press **Shop** again for
   another random piece, or **Buy** to create it: it is saved like any wardrobe piece, added to the dresser and
   worn in the current outfit (waiting for your approval).
 * **Edit this outfit…** (on the *Current outfit & history* page) changes the shown outfit, current or past:

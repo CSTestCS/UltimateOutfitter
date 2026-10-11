@@ -868,3 +868,5 @@ def test_switch_never_replaces_approved_pieces(lib, tmp_path):
     # the only top is rejected, but the approved bottoms keep the outfit a top + bottoms
     assert s.reject(s.proposal["base_top"][0], "style") is None
     assert s.proposal["legs"] == [bottoms] and not s.proposal.get("full_body")
+    # the shop still offers dresses for the missing top - buying one is the user's choice
+    assert "full_body" in s.shop_targets("base_top") and "full_body" not in s.shop_targets("legs")
