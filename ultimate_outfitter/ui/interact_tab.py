@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QFil
                                QPlainTextEdit, QPushButton, QSplitter, QStackedWidget, QTextBrowser,
                                QVBoxLayout, QWidget)
 
-from ..core import expressions, material_rules, vrm_match
+from ..core import expressions, material_rules, preview_settings, vrm_match
 from ..core.animations import AnimationLibrary
 from ..core.categories import ACTIVITIES, WEATHER
 from ..core.character import Character, list_characters
@@ -47,6 +47,7 @@ class InteractTab(QWidget):
         self.model_info: dict = {}
         self.rng = random.Random()
         self.server = ViewerServer(state.library.root)
+        self.preview = preview_settings.load(state.library)
         self.anims = AnimationLibrary(state.library.root / "Animations")
 
         # ---- top bar
@@ -134,11 +135,11 @@ class InteractTab(QWidget):
         self.wet_mode.addItem("Wet look: always", "on")
         self.wet_mode.addItem("Wet look: never", "off")
         self.wet_mode.currentIndexChanged.connect(lambda *_: self._apply_wet())
-        self.matcap_metal = QCheckBox("Reflection (matcap) textures are metallic")
-        self.matcap_metal.setChecked(True)
-        self.matcap_metal.setToolTip("VRoid uses matcap / sphere textures for shiny metal; render those parts "
-                                     "as reflective metal")
-        self.matcap_metal.toggled.connect(lambda *_: self._apply_materials())
+        self.wet_mode.setToolTip("Automatic: wet when swimming, in the rain or sweating in scorching heat")
+        b_prev = QPushButton("Preview settings…")
+        b_prev.setToolTip("Edit preview_settings.txt: wet see-through, shine strengths, wet darkening, physics and "
+                          "the default facial expressions for new characters")
+        b_prev.clicked.connect(self.edit_preview_settings)
         b_mats = QPushButton("Edit materials…")
         b_mats.setToolTip("Open this character's materials.txt (force parts of the model to be metallic, silk, "
                           "thin or thick)")
@@ -146,7 +147,7 @@ class InteractTab(QWidget):
         b_mat_list = QPushButton("List model materials")
         b_mat_list.clicked.connect(lambda: self.viewport.call("listMaterials", report="materials"))
         view_bar4 = QHBoxLayout()
-        for w in (self.wet_mode, self.matcap_metal, b_mats, b_mat_list):
+        for w in (self.wet_mode, b_prev, b_mats, b_mat_list):
             view_bar4.addWidget(w)
         view_bar4.addStretch(1)
         left = QVBoxLayout()
@@ -237,6 +238,7 @@ class InteractTab(QWidget):
             self.server.library_root = root
             self.anims = AnimationLibrary(root / "Animations")
             self._fill_poses()
+        self.preview = preview_settings.load(self.state.library)
         self.refresh_characters()
 
     def reload_animations(self):
@@ -285,6 +287,7 @@ class InteractTab(QWidget):
         self.character = Character.open(self.state.library, Path(path))
         self.match_info = ""
         self.conv = Conversation(self.character, self.player.text() or "you")
+        self.preview = preview_settings.load(self.state.library)
         self.expr = expressions.load(self.character)
         vs = self.character.data.get("viewer", {})
         self.time_combo.blockSignals(True)
@@ -365,6 +368,7 @@ class InteractTab(QWidget):
         if self.conv:
             self.viewport.call("setLighting", {"weather": self.conv.state["weather"],
                                                "time": self.time_combo.currentData()})
+            self._apply_wet()    # rain / heat / swimming and wind follow the weather and activity
 
     def _apply_background(self):
         bg = dict(self.character.data.get("viewer", {}).get("background", {"mode": "sky"})) if self.character else {}
@@ -377,9 +381,10 @@ class InteractTab(QWidget):
         """Metallic / silk detection rules for the loaded model, then the wet look."""
         if not self.character or not self.loaded_vrm:
             return
-        self.viewport.call("setMaterialRules", {"overrides": material_rules.load_overrides(self.character),
-                                                "matcapAsMetal": self.matcap_metal.isChecked()})
+        self.viewport.call("setPreviewSettings", self._settings_payload())
+        self.viewport.call("setMaterialRules", {"overrides": material_rules.load_overrides(self.character)})
         self._apply_wet()
+        self._apply_hidden()
 
     def _match_wardrobe(self):
         """Compare the model's textures with the wardrobe images (in the background) and send the
@@ -427,8 +432,44 @@ class InteractTab(QWidget):
             wet, strength = True, max(strength, 1.0)
         elif mode == "off":
             wet = False
-        self.viewport.call("setWet", {"on": wet, "strength": strength or 1.0, "thinOpacity": 0.7,
+        nums = self.preview["numbers"]
+        self.viewport.call("setWet", {"on": wet, "strength": strength or 1.0,
+                                      "thinOpacity": nums["wet thin opacity"],
                                       "thin": material_rules.thin_keywords(self.character)})
+        self._apply_physics(strength if wet else 0.0)
+
+    def _settings_payload(self) -> dict:
+        n = self.preview["numbers"]
+        return {"metallic": n["metallic shine"], "silk": n["silk shine"], "wetShine": n["wet shine"],
+                "darken": n["wet darkening"]}
+
+    def _apply_physics(self, wetness: float = 0.0):
+        if not self.conv or not self.loaded_vrm:
+            return
+        n = self.preview["numbers"]
+        weather = self.conv.state.get("weather")
+        breeze = {"Windy": 1.0, "Rainy": 0.35, "Cold": 0.15, "Freezing / snowy": 0.3, "Cool": 0.1}.get(weather, 0.0)
+        self.viewport.call("setPhysics", {"enabled": n["physics"] >= 0.5, "stiffness": n["physics stiffness"],
+                                          "wind": breeze * n["wind strength"], "wet": wetness})
+
+    def _apply_hidden(self):
+        """Hide the model parts of pieces taken off the shown outfit."""
+        if not self.character or not self.loaded_vrm:
+            return
+        outfit = self.character.shown_outfit() or {}
+        removed = outfit.get("removed", [])
+        words = material_rules.removed_keywords(self.character, removed)
+        self.viewport.call("setHidden", {"entries": [r.get("entry_id") for r in removed], "words": words})
+
+    def edit_preview_settings(self):
+        path = preview_settings.ensure(self.state.library)
+        self._edit_text_file(path, "preview_settings.txt", self._reload_preview_settings)
+
+    def _reload_preview_settings(self):
+        self.preview = preview_settings.load(self.state.library)
+        self.expr = expressions.load(self.character) if self.character else {}
+        self._apply_materials()
+        self._apply_expression()
 
     def edit_materials(self):
         if not self.character:

@@ -202,14 +202,34 @@ modified.
   A piece whose clothing item is marked **thin** becomes see-through while wet. Older pieces made before shine masks
   existed get theirs generated automatically. The status line under the viewport lists what was matched.
 * **Fallback:** model parts that don't match the wardrobe still count as **metallic** when their material or
-  texture name says so (metallic, metal, chrome, silver, gold, steel, armor) or when they use a matcap / sphere
-  reflection texture (*Reflection (matcap) textures are metallic*).
+  texture name says so (metallic, metal, chrome, silver, gold, steel, armor). VRoid's matcap textures are no
+  longer treated as metal, since VRoid puts them on many parts that are not metal.
 * **Silk** or **satin** parts get a soft sheen.
-* **Wet look:** when it's raining or the character is swimming, the whole character gets a glossy wet shine.
-  *Wet look* can also be set to always or never.
+* **Wet look:** when the character is swimming, it's raining, or the weather is **scorching hot** (sweat), the
+  whole character - skin, hair, clothing and accessories - gets crisp glossy highlights. Clothing that isn't thin,
+  metallic or silk, plus the hair and accessories, also gets a little **darker**, like soaked fabric. *Wet look*
+  can also be set to always or never.
 * **Thin clothing:** clothing items have a new question, *How thick is the fabric?* (thin / medium / thick). While
   wet, the parts of the model belonging to **thin** items of the current outfit become about 70% opaque. Parts are
   matched by material names, using the item's name words and its slot (e.g. Tops, Bottoms, Bra, Bikini, Socks).
+* **Physics:** the model's spring bones (hair, skirts, ribbons...) swing with every movement. A gentle idle sway
+  keeps them alive when no animation is playing, they blow in the wind when it's **Windy** (a little in rain and
+  cold), and wet hair hangs heavier.
+* **Preview settings…** opens `preview_settings.txt` in the library folder. It is shared by all characters:
+
+  | Setting | Default | Meaning |
+  |---|---|---|
+  | `wet thin opacity` | 0.7 | opacity of thin clothing while wet (1 = not see-through) |
+  | `metallic shine` | 1.0 | strength of metallic reflections (0 = off) |
+  | `silk shine` | 1.0 | strength of the silk sheen (0 = off) |
+  | `wet shine` | 1.0 | strength of the wet gloss (0 = off) |
+  | `wet darkening` | 0.25 | how much darker clothing, hair and accessories get while wet |
+  | `physics` | 1 | spring-bone physics on (1) or off (0) |
+  | `physics stiffness` | 1.0 | multiplies the model's spring stiffness |
+  | `wind strength` | 1.0 | how strongly wind moves hair and clothing |
+
+  Its `[default expressions]` section holds the mood and reaction faces. Every new character's `expressions.txt`
+  starts from them, and any mood missing from a character's file uses them.
 * **List model materials** shows every material, which wardrobe piece it matched and what the preview does with it.
   Manual rules are optional: **Edit materials…** opens the character's `materials.txt`, which can override any
   part, e.g. `Bra = metallic`, `Tops_01 = thin`, `Hair = none`.

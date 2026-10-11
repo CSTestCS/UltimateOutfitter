@@ -7,6 +7,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import * as Mat from './materials.js';
+import * as Phys from './physics.js';
 
 // ---------------------------------------------------------------------------
 // scene setup
@@ -146,7 +147,9 @@ function animate() {
   if (vrm) {
     if (vrm.lookAt) vrm.lookAt.target = lookAtCamera ? camera : null;
     applyExpressions(dt);
+    Phys.beforeUpdate(dt, !!(currentAction && currentAction.isRunning()));
     vrm.update(dt);
+    Phys.afterUpdate();
   }
   if (precipitation) updatePrecipitation(dt);
   renderer.render(scene, camera);
@@ -190,6 +193,9 @@ async function loadVRM(url) {
     idleClip = null;
     Mat.attach(vrm, gltf.parser && gltf.parser.json);
     relaxArms();
+    vrm.update(0);
+    Phys.attach(vrm);
+    Phys.settle();
     frameModel();
     setStatus('');
     return { ok: true, expressions: listExpressions() };
@@ -201,6 +207,7 @@ async function loadVRM(url) {
 
 function clearModel() {
   Mat.detach();
+  Phys.detach();
   if (vrm) { scene.remove(vrm.scene); VRMUtils.deepDispose(vrm.scene); }
   vrm = null; mixer = null; currentAction = null; idleClip = null;
 }
@@ -337,7 +344,7 @@ function stopAnimation() {
   if (mixer) mixer.stopAllAction();
   currentAction = null;
   idleClip = null;
-  if (vrm) { vrm.humanoid.resetNormalizedPose(); relaxArms(); }
+  if (vrm) { vrm.humanoid.resetNormalizedPose(); relaxArms(); vrm.update(0); Phys.settle(); }
 }
 
 // ---------------------------------------------------------------------------
@@ -491,6 +498,10 @@ window.UO = {
   setMaterialRules(r) { Mat.setRules(r); return Mat.list(); },
   setWet(w) { Mat.setWet(w); return true; },
   setWardrobeMatches(list) { Mat.setMatches(list); return Mat.list(); },
+  setPreviewSettings(v) { Mat.setSettings(v); return true; },
+  setHidden(h) { return Mat.setHidden(h); },
+  setPhysics(o) { Phys.set(o); return Phys.count(); },
+  physicsInfo() { return { joints: Phys.count(), sample: Phys.sample() }; },
   listMaterials() { return Mat.list(); },
   info() { return { model: !!vrm, idle: idleClip, expression: expressionWeights }; },
 };

@@ -5,6 +5,8 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 
 const NEVER_SEE_THROUGH = /skin|body|face|eye|hair|mouth|brow|lash|teeth|tongue|iris|highlight/i;
+// parts that never get darker when wet (skin and face); hair, clothing and accessories do
+const SKIN = /skin|face|eye|mouth|brow|lash|teeth|tongue|iris|highlight/i;
 const METAL_WORDS = /metallic|metal|chrome|silver|gold|steel|iron|armor|armour/i;
 const SILK_WORDS = /silk|satin/i;
 
@@ -13,11 +15,17 @@ let scene = null;
 let envTexture = null;
 let entries = [];          // one per (mesh, material slot)
 let overlays = [];         // wet / silk gloss layers, one per mesh
-let rules = { overrides: {}, matcapAsMetal: true };
+let rules = { overrides: {} };
+// strengths from preview_settings.txt
+let settings = { metallic: 1, silk: 1, wetShine: 1, darken: 0.25 };
+let glossEnv = null;       // dark environment with a few bright panels: sharp highlights, no haze
 let wet = { on: false, strength: 1, thin: [], thinOpacity: 0.7 };
 let envIntensity = 1;
 let matches = [];          // wardrobe pieces found among the model's textures (from Python)
 let effectOverlays = [];   // masked metallic / silk layers for matched pieces
+let outlines = [];         // MToon outline material slots: [{mesh, mat}]
+let hiddenEntries = new Set();   // wardrobe entry ids taken off - their model parts are hidden
+let hiddenWords = [];            // fallback material-name words for removed pieces with no texture match
 const maskLoader = new THREE.TextureLoader();
 
 export function init(r, s) {
@@ -26,6 +34,26 @@ export function init(r, s) {
   const pmrem = new THREE.PMREMGenerator(renderer);
   envTexture = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
   scene.environment = envTexture;  // only affects standard / physical materials (MToon ignores it)
+  glossEnv = pmrem.fromScene(highlightRoom(), 0.02).texture;
+}
+
+// a black room with a few bright soft-boxes: reflecting it gives the crisp highlights of a wet or
+// glossy surface without washing the colours out
+function highlightRoom() {
+  const room = new THREE.Scene();
+  room.background = new THREE.Color(0x000000);
+  const panel = (w, h, x, y, z, intensity) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(intensity, intensity, intensity), side: THREE.DoubleSide }));
+    m.position.set(x, y, z);
+    m.lookAt(0, 0, 0);
+    room.add(m);
+  };
+  panel(3, 2, 2.5, 3, 4, 6);      // key light, front right above
+  panel(1.2, 4, -4, 1, 1, 3);     // tall strip on the left
+  panel(4, 1, 0, 5, -2, 4);       // top / back rim
+  panel(2, 1, 0, -3, 3, 0.6);     // faint bounce from below
+  return room;
 }
 
 function texName(tex) {
@@ -75,10 +103,8 @@ function classify(e) {
   const tname = texName(e.original.map);
   if (METAL_WORDS.test(name) || METAL_WORDS.test(tname)) return { effect: 'metallic', why: 'name' };
   if (SILK_WORDS.test(name) || SILK_WORDS.test(tname)) return { effect: 'silk', why: 'name' };
-  // note: the glTF metallicFactor is NOT used - VRM exporters often write 1.0 for every material
-  if (rules.matcapAsMetal && e.original.matcapTexture && !NEVER_SEE_THROUGH.test(name)) {
-    return { effect: 'metallic', why: 'matcap (reflection) texture' };
-  }
+  // note: the glTF metallicFactor and VRoid's matcap textures are NOT used - exporters set them on
+  // many materials that are not metal, which made the choice look random
   return { effect: null, why: '' };
 }
 
@@ -95,7 +121,7 @@ function makeMetal(src, json) {
     opacity: src.opacity ?? 1,
     alphaTest: src.alphaTest || 0,
     side: src.side,
-    envMapIntensity: envIntensity * 1.2,
+    envMapIntensity: envIntensity * 1.2 * settings.metallic,
   });
   return m;
 }
@@ -143,6 +169,7 @@ export function attach(vrm, gltfJson) {
         e.gloss = g;
         glossMats.push(g);
       } else {
+        outlines.push({ mesh: obj, mat });
         const hidden = new THREE.MeshBasicMaterial({ visible: false });
         glossMats.push(hidden);
       }
@@ -170,6 +197,7 @@ export function detach() {
   overlays = [];
   clearEffectOverlays();
   entries = [];
+  outlines = [];
 }
 
 function setSlot(e, mat) {
@@ -213,41 +241,65 @@ function apply() {
     mat.opacity = opacity;
     if (mat === e.original) mat.depthWrite = seeThrough ? false : e.base.depthWrite;
     e.seeThrough = seeThrough;
-    if (e.metal) e.metal.envMapIntensity = envIntensity * 1.2;
+    if (e.metal) e.metal.envMapIntensity = envIntensity * 1.2 * settings.metallic;
+    applyDarkening(e);
     for (const o of effectOverlays) {
       const ms = Array.isArray(o.material) ? o.material : [o.material];
       for (const m of ms) {
         if (!m.userData.effectKind) continue;
-        if (m.userData.effectKind === 'metallic') m.envMapIntensity = envIntensity * 1.2;
+        if (m.userData.effectKind === 'metallic') m.envMapIntensity = envIntensity * 1.2 * settings.metallic;
+        if (m.userData.effectKind === 'silk') m.userData.baseOpacity = 0.35 * Math.min(1, settings.silk);
         // see-through thin clothing: the shine layer fades with the fabric
         const ent = m.userData.entry;
         m.opacity = m.userData.baseOpacity * (ent && ent.seeThrough ? wet.thinOpacity : 1);
       }
     }
+    // pieces taken off are hidden (with their outline and effect layers)
+    e.hidden = e.match ? hiddenEntries.has(e.match.entry_id)
+      : (!NEVER_SEE_THROUGH.test(e.name) && hiddenWords.some((w) => w && e.name.toLowerCase().includes(w.toLowerCase())));
+    mat.visible = !e.hidden;
     // gloss layer: wet = whole body, silk = sheen on silk parts only
     const g = e.gloss;
-    if (wet.on) {
+    if (wet.on && settings.wetShine > 0) {
+      // wet: crisp highlights over the whole character (skin, hair, clothing, accessories)
       g.visible = true;
-      g.roughness = 0.22;
-      g.clearcoat = 0.7;
-      g.clearcoatRoughness = 0.1;
-      g.opacity = 0.32 * wet.strength;
-      g.envMapIntensity = envIntensity * 0.45;
-    } else if (e.effect === 'silk') {
+      g.envMap = glossEnv;
+      g.roughness = 0.12;
+      g.clearcoat = 1;
+      g.clearcoatRoughness = 0.04;
+      g.opacity = Math.min(1, 0.85 * wet.strength * settings.wetShine);
+      g.envMapIntensity = Math.max(0.6, envIntensity) * 1.1 * settings.wetShine;
+    } else if (e.effect === 'silk' && settings.silk > 0) {
       g.visible = true;
+      g.envMap = glossEnv;
       g.roughness = 0.4;
       g.clearcoat = 0.3;
       g.clearcoatRoughness = 0.35;
-      g.opacity = 0.3;
-      g.envMapIntensity = envIntensity * 0.35;
+      g.opacity = Math.min(1, 0.45 * settings.silk);
+      g.envMapIntensity = Math.max(0.6, envIntensity) * 0.5 * settings.silk;
     } else {
       g.visible = false;
     }
   }
+  for (const e of entries) if (e.hidden) e.gloss.visible = false;
   for (const o of overlays) {
     const mats = Array.isArray(o.material) ? o.material : [o.material];
     o.visible = mats.some((m) => m.userData.isGloss && m.visible);
   }
+  for (const o of effectOverlays) {
+    const ms = Array.isArray(o.material) ? o.material : [o.material];
+    o.visible = !ms.some((m) => m.userData.entry && m.userData.entry.hidden);
+  }
+  for (const { mesh, mat } of outlines) {
+    mat.visible = !entries.some((e) => e.hidden && e.mesh === mesh && mat.name && e.name && mat.name.startsWith(e.name));
+  }
+}
+
+export function setHidden(h) {
+  hiddenEntries = new Set((h && h.entries) || []);
+  hiddenWords = (h && h.words) || [];
+  apply();
+  return entries.filter((e) => e.hidden).map((e) => e.name);
 }
 
 function clearEffectOverlays() {
@@ -281,13 +333,14 @@ function maskedEffectMaterial(e, kind, mask) {
       map: src.map || null, color: src.color ? src.color.clone() : new THREE.Color(1, 1, 1),
       metalness: 1.0, roughness: 0.22, alphaMap: mask, transparent: true, depthWrite: false,
       polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1, side: src.side,
-      envMapIntensity: envIntensity * 1.2,
+      envMapIntensity: envIntensity * 1.2 * settings.metallic,
     });
   }
   const g = glossMaterial(src);   // silk: soft additive sheen limited by the mask
   g.alphaMap = mask;
-  g.roughness = 0.4; g.clearcoat = 0.3; g.clearcoatRoughness = 0.35; g.opacity = 0.35;
-  g.envMapIntensity = envIntensity * 0.4;
+  g.envMap = glossEnv;
+  g.roughness = 0.4; g.clearcoat = 0.3; g.clearcoatRoughness = 0.35; g.opacity = 0.35 * Math.min(1, settings.silk);
+  g.envMapIntensity = Math.max(0.6, envIntensity) * 0.5 * settings.silk;
   return g;
 }
 
@@ -315,12 +368,41 @@ export function setMatches(list) {
 }
 
 export function setRules(r) {
-  rules = Object.assign({ overrides: {}, matcapAsMetal: true }, r || {});
+  rules = Object.assign({ overrides: {} }, r || {});
   if (entries.length) reclassify();
+}
+
+export function setSettings(v) {
+  settings = Object.assign({ metallic: 1, silk: 1, wetShine: 1, darken: 0.25 }, v || {});
+  if (entries.length) { buildEffectOverlays(); apply(); }
+}
+
+// ---------------------------------------------------------------------------
+// wet darkening: soaked fabric, hair and accessories look darker (not thin, metallic, silk or skin)
+// ---------------------------------------------------------------------------
+function darkens(e) {
+  if (SKIN.test(e.name) && !/hair/i.test(e.name)) return false;
+  if (/body/i.test(e.name) && !/cloth|tops|bottoms|onepiece|shoes|accessory/i.test(e.name)) return false;
+  if (e.effect === 'metallic' || e.effect === 'silk' || isThin(e)) return false;
+  if (e.match && (e.match.shine || []).some((s) => s.kind === 'silk')) return false;
+  return true;
+}
+
+const COLOR_KEYS = ['color', 'shadeColorFactor'];
+function applyDarkening(e) {
+  const mat = e.original;
+  if (!e.baseColors) {
+    e.baseColors = {};
+    for (const k of COLOR_KEYS) if (mat[k] && mat[k].isColor) e.baseColors[k] = mat[k].clone();
+  }
+  const amount = wet.on && darkens(e) ? Math.min(0.9, settings.darken * Math.max(0.5, wet.strength)) : 0;
+  e.darkened = amount > 0;
+  for (const [k, c] of Object.entries(e.baseColors)) mat[k].copy(c).multiplyScalar(1 - amount);
 }
 
 export function setWet(w) {
   wet = Object.assign({ on: false, strength: 1, thin: [], thinOpacity: 0.7 }, w || {});
+  if (w && w.settings) settings = Object.assign(settings, w.settings);
   apply();
 }
 
@@ -332,6 +414,7 @@ export function setEnvIntensity(v) {
 export function list() {
   return entries.map((e) => ({
     name: e.name, effect: e.effect, why: e.why, thin: isThin(e), seeThrough: !!e.seeThrough,
+    darkened: !!e.darkened, hidden: !!e.hidden,
     match: e.match ? { item: e.match.item_name, file: e.match.file, shine: (e.match.shine || []).map((s) => s.kind),
                        masked: (e.match.shine || []).some((s) => !!s.maskUrl) } : null,
     texture: texName(e.original.map).trim(), metallicFactor: e.json.metallicFactor,

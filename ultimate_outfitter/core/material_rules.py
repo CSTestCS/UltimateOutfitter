@@ -55,8 +55,7 @@ HEADER = """# Material rules for {name}'s 3D preview (VRoid model) - OPTIONAL
 # in the Interact tab to see the material names and what was detected.
 #
 # Automatic detection (no rule needed): material or texture names containing metallic, metal,
-# chrome, silver, gold, steel, armor (-> metallic) or silk, satin (-> silk), or a matcap /
-# sphere-add reflection texture (VRoid's way of making shiny metal; can be switched off).
+# chrome, silver, gold, steel, armor (-> metallic) or silk, satin (-> silk).
 #
 # Examples:
 # Bra = metallic
@@ -120,9 +119,35 @@ def thin_keywords(character) -> list[str]:
     return sorted(set(thin))
 
 
+def removed_keywords(character, removed: list[dict]) -> list[str]:
+    """Material-name words for pieces taken off the outfit (used when no model texture matched them).
+
+    Words that also describe a piece still being worn are left out, so nothing worn gets hidden.
+    """
+    outfit = character.shown_outfit() or {}
+    wardrobe = character.data.get("wardrobe", {})
+    keep = set()
+    for p in outfit.get("pieces", []):
+        slot = p.get("slot") or wardrobe.get(p.get("entry_id"), {}).get("slot", "")
+        keep.update(SLOT_MATERIAL_WORDS.get(slot, []))
+        if slot in GENERIC:
+            keep.add(GENERIC[slot])
+    words = set()
+    for r in removed:
+        slot = r.get("slot") or wardrobe.get(r.get("entry_id"), {}).get("slot", "")
+        words.update(SLOT_MATERIAL_WORDS.get(slot, []))
+        words.update(w for w in re.split(r"[^a-zA-Z]+", r.get("name", "").lower()) if len(w) > 2 and w not in STOP_WORDS)
+        if slot in GENERIC:
+            words.add(GENERIC[slot])
+    return sorted(words - keep)
+
+
 def is_wet(state: dict) -> tuple[bool, float]:
+    """Wet from swimming, rain, or sweat in scorching heat -> (wet, strength 0-1)."""
     if state.get("activity") == "Swimming / beach":
         return True, 1.0
     if state.get("weather") == "Rainy":
         return True, 0.8
+    if state.get("weather") == "Scorching hot":
+        return True, 0.6
     return False, 0.0

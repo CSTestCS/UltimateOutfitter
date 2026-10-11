@@ -65,11 +65,20 @@ def config_path(character) -> Path:
     return character.dir / "expressions.txt"
 
 
+def library_defaults(character) -> dict[str, str]:
+    """Default faces from the library's preview_settings.txt (falls back to DEFAULTS)."""
+    from . import preview_settings
+    try:
+        return preview_settings.default_expressions(getattr(character, "library", None))
+    except OSError:
+        return dict(DEFAULTS)
+
+
 def ensure_config(character) -> Path:
     path = config_path(character)
     if not path.exists():
         lines = [HEADER.format(name=character.name, moods=", ".join(MOODS), reactions=", ".join(REACTIONS))]
-        lines += [f"{k} = {v}" for k, v in DEFAULTS.items()]
+        lines += [f"{k} = {v}" for k, v in library_defaults(character).items()]
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
 
@@ -96,11 +105,14 @@ def parse(text: str) -> dict[str, dict[str, float]]:
 
 
 def load(character) -> dict[str, dict[str, float]]:
+    """The character's faces; moods missing from their file use the library defaults."""
+    defaults = {k.lower(): parse(f"x = {v}")["x"] for k, v in library_defaults(character).items()}
     path = ensure_config(character)
     try:
-        return parse(path.read_text(encoding="utf-8"))
+        own = parse(path.read_text(encoding="utf-8"))
     except OSError:
-        return {k.lower(): parse(f"x = {v}")["x"] for k, v in DEFAULTS.items()}
+        own = {}
+    return {**defaults, **own}
 
 
 def weights_for(config: dict[str, dict[str, float]], name: str) -> dict[str, float]:

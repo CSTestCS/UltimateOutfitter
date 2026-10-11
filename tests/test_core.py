@@ -682,3 +682,25 @@ def test_edit_outfit_keeps_hamper(lib, tmp_path):
     assert spare in ch.data["hamper"] and spare not in ch.data["dresser"]
     assert hamper_before <= set(ch.data["hamper"])
     assert ch.data["outfit_history"][-1] is outfit and outfit.get("preview")
+
+
+def test_preview_settings_and_wet_rules(lib, tmp_path):
+    from ultimate_outfitter.core import expressions, material_rules, preview_settings
+    path = preview_settings.ensure(lib)
+    data = preview_settings.load(lib)
+    assert data["numbers"]["wet thin opacity"] == 0.7 and "Happy" in data["expressions"]
+    text = path.read_text(encoding="utf-8")
+    text = text.replace("wet darkening = 0.25", "wet darkening = 5").replace("physics = 1", "physics = off")
+    text = text.replace("Happy = happy:1.0", "Happy = happy:0.4, Fcl_ALL_Joy:0.5")
+    path.write_text(text, encoding="utf-8")
+    data = preview_settings.load(lib)
+    assert data["numbers"]["wet darkening"] == 0.9 and data["numbers"]["physics"] == 0
+    # new characters' expressions.txt start from the library defaults
+    ch = _wardrobe_char(lib, tmp_path, ["Shirts", "Pants"], build=False)
+    assert expressions.load(ch)["happy"] == {"happy": 0.4, "Fcl_ALL_Joy": 0.5}
+    assert material_rules.is_wet({"weather": "Scorching hot"})[0]
+    assert not material_rules.is_wet({"weather": "Warm"})[0]
+    # words for a removed piece never include words of pieces still worn
+    ch.data["current_outfit"] = {"id": "o1", "pieces": [{"slot": "legs", "name": "Jeans", "entry_id": "x"}]}
+    words = material_rules.removed_keywords(ch, [{"slot": "base_top", "name": "Striped Shirt", "entry_id": "y"}])
+    assert "shirt" in words and "striped" in words and "tops" in words and "bottoms" not in words
