@@ -131,10 +131,10 @@ class InteractTab(QWidget):
             view_bar3.addWidget(w)
         view_bar3.addStretch(1)
         self.wet_mode = QComboBox()
-        self.wet_mode.addItem("Wet look: automatic (rain / swimming)", "auto")
+        self.wet_mode.addItem("Wet look: automatic (rain / swimming / heat)", "auto")
         self.wet_mode.addItem("Wet look: always", "on")
         self.wet_mode.addItem("Wet look: never", "off")
-        self.wet_mode.currentIndexChanged.connect(lambda *_: self._apply_wet())
+        self.wet_mode.currentIndexChanged.connect(lambda *_: (self._apply_wet(), self.conv and self._show_status()))
         self.wet_mode.setToolTip("Automatic: wet when swimming, in the rain or sweating in scorching heat")
         b_prev = QPushButton("Preview settings…")
         b_prev.setToolTip("Edit preview_settings.txt: wet see-through, metallic / silk / wet shine levels, wet darkening, physics and "
@@ -480,6 +480,15 @@ class InteractTab(QWidget):
                                       "thin": material_rules.thin_keywords(self.character)})
         self._apply_physics(strength if wet else 0.0)
 
+    def _wet_text(self) -> str:
+        mode = self.wet_mode.currentData()
+        if mode == "on":
+            return "on (always)"
+        if mode == "off":
+            return "off (never)"
+        reason = material_rules.wet_reason(self.conv.state) if self.conv else ""
+        return f"on ({reason})" if reason else "off (dry)"
+
     def _settings_payload(self) -> dict:
         n = self.preview["numbers"]
         return {"metallic": n["metallic shine"], "silk": n["silk shine"], "wetShine": n["wet shine"],
@@ -767,6 +776,7 @@ class InteractTab(QWidget):
             f"<b>{html.escape(self.character.name)}</b> — mood: <b>{st['mood']}</b>, "
             f"activity: <b>{st['activity']}</b>, setting: <b>{st['setting']}</b>, weather: {st['weather']}<br>"
             f"<b>Wearing:</b> {html.escape(pieces)}<br><b>Outfit:</b> {fit}{model}"
+            + f"<br><b>Wet look:</b> {self._wet_text()}"
             + (f"<br><i>{html.escape(self.match_info)}</i>" if self._vrm_rel() and getattr(self, "match_info", "") else ""))
 
     # ---------------------------------------------------------------- chat

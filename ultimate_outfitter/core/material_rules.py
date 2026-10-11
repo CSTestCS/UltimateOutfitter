@@ -142,6 +142,17 @@ def removed_keywords(character, removed: list[dict]) -> list[str]:
     return sorted(words - keep)
 
 
+def wet_reason(state: dict) -> str:
+    """Why the character is wet ("" when dry)."""
+    if state.get("activity") == "Swimming / beach":
+        return "swimming"
+    if state.get("weather") == "Rainy":
+        return "rain"
+    if state.get("weather") == "Scorching hot":
+        return "sweat in the scorching heat"
+    return ""
+
+
 def is_wet(state: dict) -> tuple[bool, float]:
     """Wet from swimming, rain, or sweat in scorching heat -> (wet, strength 0-1)."""
     if state.get("activity") == "Swimming / beach":

@@ -222,11 +222,13 @@ modified.
 * **Fallback:** model parts that don't match the wardrobe still count as **metallic** when their material or
   texture name says so (metallic, metal, chrome, silver, gold, steel, armor). VRoid's matcap textures are no
   longer treated as metal, since VRoid puts them on many parts that are not metal.
-* **Silk** or **satin** parts get a soft sheen.
+* **Silk** or **satin** parts get a soft fabric sheen that glows towards the edges. It is always on for those
+  parts and looks different from the wet look, which adds sharp, mirror-like highlights to the whole character.
 * **Wet look:** when the character is swimming, it's raining, or the weather is **scorching hot** (sweat), the
   whole character - skin, hair, clothing and accessories - gets crisp glossy highlights. Clothing that isn't thin,
   metallic or silk, plus the hair and accessories, also gets a little **darker**, like soaked fabric. *Wet look*
-  can also be set to always or never.
+  can also be set to always or never. The status line under the viewport shows whether the character is wet and
+  why.
 * **Thin clothing:** clothing items have a new question, *How thick is the fabric?* (thin / medium / thick). While
   wet, the parts of the model belonging to **thin** items of the current outfit become about 70% opaque. Parts are
   matched by material names, using the item's name words and its slot (e.g. Tops, Bottoms, Bra, Bikini, Socks).

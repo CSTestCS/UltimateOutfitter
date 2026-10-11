@@ -126,6 +126,20 @@ function classify(e) {
   return { effect: null, why: '' };
 }
 
+// silk / satin: a soft fabric sheen that glows towards the edges and broad, blurry highlights -
+// clearly different from the sharp, mirror-like highlights of the wet look
+function silkLook(g) {
+  g.envMap = glossEnv;
+  g.roughness = 0.5;
+  g.clearcoat = 0;
+  g.specularIntensity = 0.6;
+  g.sheen = 1;
+  g.sheenRoughness = 0.35;
+  g.sheenColor.setRGB(1, 1, 1);
+  g.opacity = Math.min(1, 0.75 * mix(silkS()));
+  g.envMapIntensity = Math.max(0.6, envIntensity) * 0.7 * boost(silkS());
+}
+
 function glossMaterial(src) {
   // black base + additive blending: only the specular / clearcoat highlights are added on top
   const m = new THREE.MeshPhysicalMaterial({
@@ -245,8 +259,8 @@ function apply() {
         if (!m.userData.effectKind) continue;
         if (m.userData.effectKind === 'metallic') tuneMetal(m);
         if (m.userData.effectKind === 'silk') {
-          m.userData.baseOpacity = 0.85 * mix(silkS());
-          m.envMapIntensity = Math.max(0.6, envIntensity) * 0.9 * boost(silkS());
+          silkLook(m);
+          m.userData.baseOpacity = m.opacity;
         }
         // see-through thin clothing: the shine layer fades with the fabric
         const ent = m.userData.entry;
@@ -266,16 +280,13 @@ function apply() {
       g.roughness = 0.12;
       g.clearcoat = 1;
       g.clearcoatRoughness = 0.04;
+      g.sheen = 0;
+      g.specularIntensity = 1;
       g.opacity = Math.min(1, 0.85 * wet.strength * mix(wetS()));
       g.envMapIntensity = Math.max(0.6, envIntensity) * 1.1 * boost(wetS());
     } else if (e.effect === 'silk' && silkS() > 0) {
       g.visible = true;
-      g.envMap = glossEnv;
-      g.roughness = 0.3;
-      g.clearcoat = 0.7;
-      g.clearcoatRoughness = 0.22;
-      g.opacity = Math.min(1, 0.85 * mix(silkS()));
-      g.envMapIntensity = Math.max(0.6, envIntensity) * 0.9 * boost(silkS());
+      silkLook(g);
     } else {
       g.visible = false;
     }
@@ -339,9 +350,7 @@ function maskedEffectMaterial(e, kind, mask) {
   }
   const g = glossMaterial(src);   // silk: soft additive sheen limited by the mask
   g.alphaMap = mask;
-  g.envMap = glossEnv;
-  g.roughness = 0.3; g.clearcoat = 0.7; g.clearcoatRoughness = 0.22; g.opacity = 0.85 * mix(silkS());
-  g.envMapIntensity = Math.max(0.6, envIntensity) * 0.9 * boost(silkS());
+  silkLook(g);
   return g;
 }
 
@@ -422,7 +431,7 @@ export function setEnvIntensity(v) {
 export function list() {
   return entries.map((e) => ({
     name: e.name, effect: e.effect, why: e.why, thin: isThin(e), seeThrough: !!e.seeThrough,
-    darkened: !!e.darkened, hidden: !!e.hidden,
+    darkened: !!e.darkened, hidden: !!e.hidden, gloss: !!(e.gloss && e.gloss.visible),
     match: e.match ? { item: e.match.item_name, file: e.match.file, shine: (e.match.shine || []).map((s) => s.kind),
                        masked: (e.match.shine || []).some((s) => !!s.maskUrl) } : null,
     texture: texName(e.original.map).trim(), metallicFactor: e.json.metallicFactor,
