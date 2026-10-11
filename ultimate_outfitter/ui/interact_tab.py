@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QFil
                                QPlainTextEdit, QPushButton, QSplitter, QStackedWidget, QTextBrowser,
                                QVBoxLayout, QWidget)
 
-from ..core import expressions, material_rules, preview_settings, vrm_match
+from ..core import expressions, hidden_parts, material_rules, preview_settings, vrm_match
 from ..core.animations import AnimationLibrary
 from ..core.categories import ACTIVITIES, WEATHER
 from ..core.character import Character, list_characters
@@ -21,7 +21,7 @@ from ..core.interact import Conversation
 from ..core.outfit import MOODS, SETTINGS
 from ..core.storage import safe_name, unique_path
 from ..core.viewer_server import ViewerServer
-from .common import IMAGE_FILTER, AppState, Worker, thumb_cache
+from .common import IMAGE_FILTER, AppState, Worker, drop_down, thumb_cache
 from .viewport3d import Viewport3D
 from .wardrobe_tab import open_folder
 
@@ -51,13 +51,13 @@ class InteractTab(QWidget):
         self.anims = AnimationLibrary(state.library.root / "Animations")
 
         # ---- top bar
-        self.char_combo = QComboBox()
+        self.char_combo = drop_down(QComboBox())
         self.char_combo.currentIndexChanged.connect(self._select)
         self.player = QLineEdit("you")
         self.player.setMaximumWidth(160)
         self.player.setToolTip("What the character calls you")
         self.player.textChanged.connect(lambda t: self.conv and setattr(self.conv, "player", t or "you"))
-        self.day_combo = QComboBox()
+        self.day_combo = drop_down(QComboBox(), 10)
         self.day_combo.setToolTip("Which day's outfit is shown (the newest day is shown after planning a new one)")
         self.day_combo.currentIndexChanged.connect(self._day_chosen)
         top = QHBoxLayout()
@@ -144,10 +144,14 @@ class InteractTab(QWidget):
         b_mats.setToolTip("Open this character's materials.txt (force parts of the model to be metallic, silk, "
                           "thin or thick)")
         b_mats.clicked.connect(self.edit_materials)
+        b_hidden = QPushButton("Hidden parts…")
+        b_hidden.setToolTip("The model parts hidden because their pieces were taken off this outfit "
+                            "(delete a line to show a part again)")
+        b_hidden.clicked.connect(self.edit_hidden_parts)
         b_mat_list = QPushButton("List model materials")
         b_mat_list.clicked.connect(lambda: self.viewport.call("listMaterials", report="materials"))
         view_bar4 = QHBoxLayout()
-        for w in (self.wet_mode, b_prev, b_mats, b_mat_list):
+        for w in (self.wet_mode, b_prev, b_mats, b_hidden, b_mat_list):
             view_bar4.addWidget(w)
         view_bar4.addStretch(1)
         left = QVBoxLayout()
@@ -323,6 +327,7 @@ class InteractTab(QWidget):
             return
         self.character = Character.open(self.state.library, Path(path))
         self.match_info = ""
+        self.matches, self.matches_vrm = [], None
         self.conv = Conversation(self.character, self.player.text() or "you")
         self.preview = preview_settings.load(self.state.library)
         self.expr = expressions.load(self.character)
@@ -445,7 +450,9 @@ class InteractTab(QWidget):
                                   "maskUrl": self.server.lib_url(mask) if mask and mask.exists() else None})
                 payload.append(dict(m, shine=shine))
             self.viewport.call("setWardrobeMatches", payload)
+            self.matches, self.matches_vrm = matches, rel
             self._apply_wet()
+            self._apply_hidden()
             if matches:
                 bits = []
                 for m in matches:
@@ -498,18 +505,37 @@ class InteractTab(QWidget):
             return
         n = self.preview["numbers"]
         weather = self.conv.state.get("weather")
-        breeze = {"Windy": 1.0, "Rainy": 0.35, "Cold": 0.15, "Freezing / snowy": 0.3, "Cool": 0.1}.get(weather, 0.0)
+        # a gentle breeze (level 0.5) in any weather; Windy blows at level 3 and changes direction
+        windy = weather == "Windy"
+        level = 3.0 if windy else 0.5
         self.viewport.call("setPhysics", {"enabled": n["physics"] >= 0.5, "stiffness": n["physics stiffness"],
-                                          "wind": breeze * n["wind strength"], "wet": wetness})
+                                          "wind": level * n["wind strength"], "gusty": windy, "wet": wetness})
 
     def _apply_hidden(self):
-        """Hide the model parts of pieces taken off the shown outfit."""
+        """Hide the model parts of pieces taken off the shown outfit.
+
+        Only parts whose texture matched a removed piece are hidden (never guesses from names). The list
+        lives in the outfit's ...-hidden.txt so mistakes can be fixed by deleting a line.
+        """
         if not self.character or not self.loaded_vrm:
             return
-        outfit = self.character.shown_outfit() or {}
-        removed = outfit.get("removed", [])
-        # only parts whose texture matched a removed piece are hidden - never guesses from names
-        self.viewport.call("setHidden", {"entries": [r.get("entry_id") for r in removed]})
+        outfit = self.character.shown_outfit()
+        if not outfit:
+            self.viewport.call("setHidden", {"materials": []})
+            return
+        ready = getattr(self, "matches_vrm", None) == self.loaded_vrm
+        materials = hidden_parts.reconcile(self.character, outfit, self.matches if ready else None)
+        self.viewport.call("setHidden", {"materials": materials})
+
+    def edit_hidden_parts(self):
+        outfit = self.character.shown_outfit() if self.character else None
+        if not outfit:
+            QMessageBox.information(self, "Hidden parts", "There is no outfit to show.")
+            return
+        path = hidden_parts.path_for(self.character, outfit)
+        if not path.exists():
+            hidden_parts.write(self.character, outfit, hidden_parts.read(path), {})
+        self._edit_text_file(path, f"{self.character.name} - hidden model parts", self._apply_hidden)
 
     def edit_preview_settings(self):
         path = preview_settings.ensure(self.state.library)

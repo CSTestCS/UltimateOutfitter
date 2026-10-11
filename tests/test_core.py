@@ -326,6 +326,7 @@ def test_multi_image_item_and_pattern(lib, tmp_path):
     pat[..., 3] = 255
     pat[::2, ::2, :3] = 255
     pat[1::2, 1::2, 3] = 0  # transparent holes -> cutaway
+    pat = np.kron(pat, np.ones((8, 8, 1), np.uint8))   # big holes survive any print scale
     Image.fromarray(pat, "RGBA").save(tmp_path / "dots.png")
     from ultimate_outfitter.core.patterns import evaluate_pattern
     pans = {"pattern_kind": "Animal print", "pattern_boldness": "Loud / high contrast", "pattern_uses": ["Tops"]}
@@ -870,3 +871,106 @@ def test_switch_never_replaces_approved_pieces(lib, tmp_path):
     assert s.proposal["legs"] == [bottoms] and not s.proposal.get("full_body")
     # the shop still offers dresses for the missing top - buying one is the user's choice
     assert "full_body" in s.shop_targets("base_top") and "full_body" not in s.shop_targets("legs")
+
+
+def test_hidden_parts_file(lib, tmp_path):
+    from ultimate_outfitter.core import hidden_parts
+    ch = _wardrobe_char(lib, tmp_path, [], build=False)
+    outfit = {"id": "abc123", "date": "2026-10-11 09:00", "pieces": [], "removed": []}
+    matches = [{"material": "Tops_01_CLOTH", "entry_id": "shirt", "item_name": "Shirt"},
+               {"material": "HairBack_00_HAIR", "entry_id": "cape", "item_name": "Capelet"},
+               {"material": "Cape_CLOTH", "entry_id": "cape", "item_name": "Capelet"}]
+    assert hidden_parts.reconcile(ch, outfit, matches) == []
+    assert not hidden_parts.path_for(ch, outfit).exists()
+    # the capelet is taken off: both its parts are hidden and listed in the file
+    outfit["removed"] = [{"entry_id": "cape", "name": "Capelet"}]
+    assert hidden_parts.reconcile(ch, outfit, matches) == ["HairBack_00_HAIR", "Cape_CLOTH"]
+    path = hidden_parts.path_for(ch, outfit)
+    assert "Capelet" in path.read_text(encoding="utf-8")
+    # the user deletes a wrong line: that part stays shown, even after another update
+    text = path.read_text(encoding="utf-8").replace("HairBack_00_HAIR", "# removed by me")
+    path.write_text(text, encoding="utf-8")
+    assert hidden_parts.reconcile(ch, outfit, matches) == ["Cape_CLOTH"]
+    # taking the shirt off too only adds the shirt's part
+    outfit["removed"].append({"entry_id": "shirt", "name": "Shirt"})
+    assert hidden_parts.reconcile(ch, outfit, matches) == ["Cape_CLOTH", "Tops_01_CLOTH"]
+    # putting the capelet back on shows it again; unknown matches (None) just read the file
+    outfit["removed"] = [{"entry_id": "shirt", "name": "Shirt"}]
+    assert hidden_parts.reconcile(ch, outfit, matches) == ["Tops_01_CLOTH"]
+    assert hidden_parts.reconcile(ch, outfit, None) == ["Tops_01_CLOTH"]
+
+
+def test_overdressed_character_removes_least_suitable_first(lib, tmp_path):
+    import random
+    from ultimate_outfitter.core.interact import Conversation
+    cats = ["Underwear Bottoms", "Bras", "Shirts", "Pants", "Shoes", "Jackets", "Scarves"]
+    cats = [c for c in cats if c in categories.CATEGORY_BY_NAME]
+    ch = _wardrobe_char(lib, tmp_path, cats)
+    s = OutfitSession(ch, DayContext("Casual / errands", "Calm", "Cold"))
+    s.build(allow_incomplete=True)
+    w = ch.data["wardrobe"]
+    jacket = next(e["id"] for e in s.dresser_entries() if e["slot"] == "outer")
+    s.proposal["outer"] = [jacket]
+    for e in s.in_use():
+        s.approve(e)
+    outfit = s.finalize()
+    by_slot = {p["slot"]: p["entry_id"] for p in outfit["pieces"]}
+    attrs = {sl: lib.items[w[eid]["item_id"]]["attrs"] for sl, eid in by_slot.items()}
+    for a in attrs.values():
+        a["formality"], a["activities"] = 1, ["Lounging at home"]
+    attrs["outer"]["formality"] = 4          # a very formal jacket
+    attrs["base_top"]["formality"] = 3       # a fairly formal shirt
+    conv = Conversation(ch, "Sam", random.Random(5))
+    conv.state.update(activity="Lounging at home", weather="Mild", setting="Private / at home")
+    assert "formal" in {i for i, _ in conv.outfit_issues()}
+    ranked = conv.removal_candidates(allow_regret=False)
+    assert ranked[0][1] == by_slot["outer"] and ranked[0][2] == "formal"
+    assert all(eid not in (by_slot["bra"], by_slot["underwear_bottom"]) for _, eid, _ in ranked)
+    # refused: the next request is about a different part
+    r = conv.propose_removal(allow_regret=False)
+    assert r.proposal["remove"] == [by_slot["outer"]]
+    conv.answer_proposal(False)
+    nxt = conv.removal_candidate(allow_regret=False)
+    assert nxt and nxt[0] != by_slot["outer"]
+
+
+def test_print_never_repeats_the_colour_beneath(lib, tmp_path):
+    from ultimate_outfitter.core.imaging import avoid_same_colors
+    pal = ["#FFFFFF", "#808080", "#000000"]
+    before = np.zeros((4, 4, 4), np.uint8)
+    before[..., :3] = (128, 128, 128)
+    before[2:, :, :3] = (0, 0, 0)            # bottom half is black
+    before[..., 3] = 255
+    out = before.copy()
+    out[:, :2, :3] = (128, 128, 128)        # print says grey everywhere on the left
+    coverage = np.zeros((4, 4), bool)
+    coverage[:, :2] = True
+    res = avoid_same_colors(out, before, coverage, pal)
+    # on grey the grey print becomes another palette colour; on black, grey is fine
+    assert (res[:2, :2, :3] != (128, 128, 128)).any(axis=-1).all()
+    assert tuple(res[:2, 0, :3][0]) in {(255, 255, 255), (0, 0, 0)}
+    assert (res[2:, :2, :3] == (128, 128, 128)).all()
+    assert (res[:, 2:] == before[:, 2:]).all()      # outside the print nothing changes
+
+
+def test_print_scale_varies_but_is_stable(lib, tmp_path):
+    greys = lib.add_palette("Greys", ["#F0F0F0", "#808080", "#202020"])
+    arr = np.zeros((48, 48, 4), np.uint8)
+    arr[4:44, 4:44] = (128, 128, 128, 255)
+    Image.fromarray(arr, "RGBA").save(tmp_path / "base.png")
+    dots = np.zeros((16, 16, 4), np.uint8)
+    dots[4:12, 4:12] = (0, 0, 0, 255)
+    Image.fromarray(dots, "RGBA").save(tmp_path / "dots.png")
+    pat = lib.add_pattern(tmp_path / "dots.png", "Dots", {}, {}, {"repeats": 4}, cutaway="alpha")
+    ans = _first_answers("Shirts")
+    t, a = categories.evaluate_answers("Shirts", ans)
+    shirt = lib.add_item(tmp_path / "base.png", "Tee", "Shirts", ans, t, a)
+    ch = _wardrobe_char(lib, tmp_path, [], build=False)
+    one = ch.render_piece(shirt, [greys], pat, {})[0]
+    assert (one == ch.render_piece(shirt, [greys], pat, {})[0]).all()     # same piece -> same print
+    small = ch.render_piece(shirt, [greys], pat, {}, print_scale=0.5)[0]
+    big = ch.render_piece(shirt, [greys], pat, {}, print_scale=2.0)[0]
+    assert (small != big).any()
+    # the grey shirt never gets grey dots: printed pixels inside the shirt are not the base grey
+    body = arr[..., 3] > 0
+    assert ((big[..., :3] != (128, 128, 128)).any(axis=-1) & body).any()

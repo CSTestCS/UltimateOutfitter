@@ -192,6 +192,7 @@ async function loadVRM(url) {
     currentAction = null;
     idleClip = null;
     Mat.attach(vrm, gltf.parser && gltf.parser.json);
+    widenEyeRange();
     relaxArms();
     vrm.update(0);
     Phys.attach(vrm);
@@ -210,6 +211,24 @@ function clearModel() {
   Phys.detach();
   if (vrm) { scene.remove(vrm.scene); VRMUtils.deepDispose(vrm.scene); }
   vrm = null; mixer = null; currentAction = null; idleClip = null;
+}
+
+// VRoid exports tiny look-at ranges (the eyes turn only a few degrees even when the camera is far to
+// the side), so the eyes barely seemed to follow the camera. Reach full eye movement sooner and allow
+// a wider (but still natural) turn.
+function widenEyeRange() {
+  const ap = vrm && vrm.lookAt && vrm.lookAt.applier;
+  if (!ap || !ap.rangeMapHorizontalInner) return;
+  const isBone = ap.constructor && ap.constructor.type === 'bone';
+  const tune = (map, degrees) => {
+    if (!map) return;
+    map.inputMaxValue = 40;
+    map.outputScale = isBone ? Math.max(map.outputScale, degrees) : Math.max(map.outputScale, 1);
+  };
+  tune(ap.rangeMapHorizontalInner, 20);
+  tune(ap.rangeMapHorizontalOuter, 20);
+  tune(ap.rangeMapVerticalDown, 12);
+  tune(ap.rangeMapVerticalUp, 12);
 }
 
 // arms down instead of a T-pose when no animation is playing
@@ -504,6 +523,15 @@ window.UO = {
   physicsInfo() { return { joints: Phys.count(), sample: Phys.sample() }; },
   listMaterials() { return Mat.list(); },
   info() { return { model: !!vrm, idle: idleClip, expression: expressionWeights }; },
+  __moveCam(dx, dy) { camera.position.x += dx; camera.position.y += (dy || 0); controls.update(); return true; },
+  lookInfo() {
+    if (!vrm || !vrm.lookAt) return { lookAt: false };
+    const la = vrm.lookAt;
+    const eye = vrm.humanoid && vrm.humanoid.getRawBoneNode('leftEye');
+    return { lookAt: true, auto: la.autoUpdate, applier: la.applier && la.applier.constructor.name,
+             type: la.applier && la.applier.type, yaw: la.yaw, pitch: la.pitch, hasTarget: !!la.target,
+             eye: eye ? eye.quaternion.toArray().map((v) => Math.round(v * 1000) / 1000) : null };
+  },
 };
 setLighting({ weather: 'Mild', time: 'auto' });
 window.addEventListener('keydown', (e) => { if (e.key === 'f' || e.key === 'F') frameModel(); });

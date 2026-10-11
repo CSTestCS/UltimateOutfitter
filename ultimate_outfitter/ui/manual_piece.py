@@ -173,7 +173,7 @@ class ManualPieceDialog(QDialog):
         return {"item": item, "palettes": palettes, "pattern": pattern,
                 "score": self.character.rate_item(self.lib.items[item["id"]]),
                 "lock": self.lock.isChecked(), "auto_pattern": self.auto_print.isChecked(),
-                "shine": self.shine.currentData(), "custom": True}
+                "shine": self.shine.currentData(), "custom": True, "print_scale": 1.0}
 
     # ------------------------------------------------------------ preview / add
     def render_preview(self):
@@ -188,7 +188,8 @@ class ManualPieceDialog(QDialog):
         try:
             outs = self.character.render_piece(piece["item"], piece["palettes"], piece["pattern"], self.cache,
                                                shine_out=shine, info_out=info, lock=piece["lock"],
-                                               auto_pattern=piece["auto_pattern"], shine=piece["shine"])
+                                               auto_pattern=piece["auto_pattern"], shine=piece["shine"],
+                                               print_scale=piece["print_scale"])
         except OSError as exc:
             self.preview.setText(f"Preview failed: {exc}")
             return

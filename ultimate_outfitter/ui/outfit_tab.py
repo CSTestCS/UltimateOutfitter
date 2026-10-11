@@ -14,7 +14,7 @@ from ..core.categories import ACTIVITIES, SLOTS, WEATHER
 from ..core.character import Character, list_characters
 from ..core.outfit import (MOODS, REJECT_REASONS, SETTINGS, DayContext, NoOutfitPossible, OutfitSession, buy,
                            do_laundry, edit_outfit, shop_offer)
-from .common import AppState, Gallery, array_to_pixmap, thumb_cache
+from .common import AppState, Gallery, drop_down, palette_pixmap, thumb_cache
 
 
 class DayDialog(QDialog):
@@ -99,12 +99,13 @@ class ShopDialog(QDialog):
         self.slot = slot
         self.entry: dict | None = None
         self.offer: dict | None = None
-        self.cache: dict = {}
         self.rng = random.Random()
         self.setWindowTitle(f"Shop — {SLOTS.get(slot, slot)}")
+        self.resize(460, 300)
+        # the palettes the piece would use (no rendered preview of the piece itself)
         self.preview = QLabel()
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview.setMinimumSize(340, 340)
+        self.preview.setMinimumHeight(140)
         self.info = QLabel()
         self.info.setWordWrap(True)
         note = QLabel("A random piece that suits today. It doesn't follow the character's wardrobe rules. "
@@ -130,29 +131,35 @@ class ShopDialog(QDialog):
         self.next_offer()
 
     def next_offer(self):
-        from PySide6.QtWidgets import QApplication
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        try:
-            self.offer = shop_offer(self.session, self.slot, self.rng)
-            if not self.offer:
-                self.preview.setText("The collection has no clothing items for this slot.\n"
-                                     "Add some in A. Collection (and at least one palette).")
-                self.info.clear()
-                self.b_buy.setEnabled(False)
-                return
-            item, pals, pat = self.offer["item"], self.offer["palettes"], self.offer["pattern"]
-            try:
-                outs = self.session.character.render_piece(item, pals, pat, self.cache)
-                self.preview.setPixmap(array_to_pixmap(outs[0]).scaled(
-                    340, 340, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-            except OSError as exc:
-                self.preview.setText(f"Preview failed: {exc}")
-            self.info.setText(f"<b>{item['name']}</b> ({item['category']})<br>Palettes: "
-                              + " + ".join(p["name"] for p in pals)
-                              + (f"<br>Print: {pat['name']}" if pat else ""))
-            self.b_buy.setEnabled(True)
-        finally:
-            QApplication.restoreOverrideCursor()
+        self.offer = shop_offer(self.session, self.slot, self.rng)
+        if not self.offer:
+            self.preview.setText("The collection has no clothing items for this slot.\n"
+                                 "Add some in A. Collection (and at least one palette).")
+            self.info.clear()
+            self.b_buy.setEnabled(False)
+            return
+        item, pals, pat = self.offer["item"], self.offer["palettes"], self.offer["pattern"]
+        self.preview.setPixmap(self._palette_sheet(pals))
+        self.info.setText(f"<b>{item['name']}</b> ({item['category']})<br>Palettes: "
+                          + " + ".join(p["name"] for p in pals)
+                          + (f"<br>Print: {pat['name']}" if pat else ""))
+        self.b_buy.setEnabled(True)
+
+    @staticmethod
+    def _palette_sheet(palettes: list[dict]):
+        """One labelled swatch strip per palette."""
+        from PySide6.QtGui import QPainter, QPixmap
+        width, strip, label = 400, 34, 18
+        sheet = QPixmap(width, len(palettes) * (strip + label + 6))
+        sheet.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(sheet)
+        y = 0
+        for pal in palettes:
+            painter.drawText(0, y + label - 4, pal["name"] + ("  (main)" if pal is palettes[0] else ""))
+            painter.drawPixmap(0, y + label, palette_pixmap(pal["colors"], width, strip))
+            y += strip + label + 6
+        painter.end()
+        return sheet
 
     def buy(self):
         if not self.offer:
@@ -164,8 +171,15 @@ class ShopDialog(QDialog):
             QMessageBox.warning(self, "Shop", "The piece could not be created (is its image missing?).")
 
 
+UNDERWEAR_SLOTS = {"underwear_bottom", "bra"}
+
+
 class PickPieceDialog(QDialog):
-    """Pick a clean piece from the dresser (optionally limited to one slot)."""
+    """Pick a clean piece from the dresser.
+
+    Replacing a piece: the same kind of piece is listed first. A non-underwear piece can be swapped for
+    any non-underwear piece; underwear is swapped for underwear (untick "Only ..." to see everything).
+    """
 
     def __init__(self, parent, character: Character, slot: str | None = None, exclude=(), title="Add a piece"):
         super().__init__(parent)
@@ -177,7 +191,7 @@ class PickPieceDialog(QDialog):
         self.gallery = Gallery(96)
         self.gallery.itemDoubleClicked.connect(lambda *_: self.accept())
         self.only_slot = QCheckBox(f"Only “{SLOTS.get(slot, slot)}” pieces" if slot else "")
-        self.only_slot.setChecked(bool(slot))
+        self.only_slot.setChecked(bool(slot) and slot in UNDERWEAR_SLOTS)
         self.only_slot.setVisible(bool(slot))
         self.only_slot.toggled.connect(self._fill)
         bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
@@ -196,6 +210,8 @@ class PickPieceDialog(QDialog):
         entries = [w[e] for e in self.character.data["dresser"] if e in w and e not in self.exclude]
         if self.slot and self.only_slot.isChecked():
             entries = [e for e in entries if e["slot"] == self.slot]
+        elif self.slot and self.slot not in UNDERWEAR_SLOTS:
+            entries = [e for e in entries if e["slot"] not in UNDERWEAR_SLOTS]
         order = {s: i for i, s in enumerate(SLOTS)}
         entries.sort(key=lambda e: (e["slot"] != self.slot, order.get(e["slot"], 99), e["item_name"]))
         for e in entries:
@@ -292,7 +308,7 @@ class OutfitTab(QWidget):
         self.character: Character | None = None
         self.session: OutfitSession | None = None
 
-        self.char_combo = QComboBox()
+        self.char_combo = drop_down(QComboBox())
         self.char_combo.currentIndexChanged.connect(self._select)
         b_plan = QPushButton("Plan today's outfit…")
         b_plan.setStyleSheet("font-weight:bold; padding:6px 14px;")

@@ -466,6 +466,38 @@ SHINE_WORDS = {"metallic": "metallic", "metal": "metallic", "chrome": "metallic"
                "silky": "silk", "satin": "silk"}
 
 
+def avoid_same_colors(out: np.ndarray, before: np.ndarray, coverage: np.ndarray,
+                      palette: Sequence[str]) -> np.ndarray:
+    """A print must not put a palette colour on top of itself.
+
+    Where a printed pixel (``coverage``) ends up as the same palette colour that was already underneath
+    (in ``before``), it takes the neighbouring colour of the palette instead (the next lighter one, or
+    the next darker one for the lightest). Shading added by an unlocked print is kept.
+    """
+    if not coverage.any() or len(palette) < 2:
+        return out
+    colors = np.array(sorted((hex_to_rgb(c) for c in palette),
+                             key=lambda rgb: rgb_to_lab(np.array(rgb, float))[0]), dtype=float)
+
+    def nearest(px):
+        d = ((px[:, None, :3].astype(float) - colors[None]) ** 2).sum(-1)
+        return d.argmin(1)
+
+    new_idx = nearest(out[coverage])
+    old_idx = nearest(before[coverage])
+    same = new_idx == old_idx
+    if not same.any():
+        return out
+    res = out.copy()
+    px = res[coverage]
+    idx = new_idx[same]
+    swap = np.where(idx + 1 < len(colors), idx + 1, idx - 1)
+    shading = px[same, :3].astype(float) - colors[idx]
+    px[same, :3] = np.clip(colors[swap] + shading, 0, 255).round().astype(np.uint8)
+    res[coverage] = px
+    return res
+
+
 def quantize_to_palette(img: np.ndarray, mask: np.ndarray, palette: Sequence[str]) -> np.ndarray:
     """Snap the masked pixels to exact palette colours by lightness rank (dark -> light)."""
     out = img.copy()

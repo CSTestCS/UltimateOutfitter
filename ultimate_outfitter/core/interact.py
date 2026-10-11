@@ -388,6 +388,13 @@ TEMPLATES: dict[str, dict[str, list[str]]] = {
         "shy": ["The {piece} is kind of awkward for {doing}... can I take it off?"],
         "confident": ["The {piece} has to go for {doing}. Agreed?"],
     },
+    "propose_remove_formal": {
+        "any": ["I'm way too dressed up for {doing}. Mind if I take off the {piece}?",
+                "This {piece} is too fancy for {doing}... can I take it off?"],
+        "shy": ["I-I feel so overdressed... could I take off the {piece}?"],
+        "confident": ["The {piece} is overkill for {doing}. It's coming off - alright?"],
+        "elegant": ["The {piece} is rather excessive for the occasion. May I remove it?"],
+    },
     "propose_remove_regret": {
         "any": ["Honestly, I regret wearing this {piece}. Can I take it off?",
                 "I don't know why I put on the {piece} today... mind if I take it off?"],
@@ -527,7 +534,8 @@ KEY_EMOTES: dict[str, tuple[str, str | None]] = {
     "accept_remove": ("nod", None), "accept_add": ("nod", None), "accept_swap": ("nod", None),
     "decline_remove": ("shake_head", None), "decline_add": ("shake_head", None), "decline_swap": ("shake_head", None),
     "decline_modest": ("embarrassed", "Embarrassed"), "propose_remove_hot": ("fan", None),
-    "propose_remove_activity": ("think", "Thinking"), "propose_remove_regret": ("think", "Thinking"),
+    "propose_remove_activity": ("think", "Thinking"), "propose_remove_formal": ("embarrassed", "Embarrassed"),
+    "propose_remove_regret": ("think", "Thinking"),
     "removal_agreed": ("happy", None), "removal_refused": ("sad", None),
 }
 TONE_EMOTES: dict[tuple[str, str], tuple[str, str | None]] = {
@@ -805,45 +813,56 @@ class Conversation:
             return reply
         return self._finish("suggest_outfit", self.say(f"decline_{kind}", tone, extra), {})
 
-    def removal_candidate(self, allow_regret: bool = True) -> tuple[str, str] | None:
-        """A piece the character would like to take off: (entry id, reason hot | activity | regret)."""
+    def removal_candidates(self, allow_regret: bool = True) -> list[tuple[float, str, str]]:
+        """Pieces the character would like to take off, least suitable first: [(score, entry id, reason)].
+
+        Reasons: hot (too warm), formal (overdressed for the activity), activity (in the way),
+        regret (they don't like it). Underwear / swimwear is never included, nor anything that would
+        leave them uncovered, nor pieces the player already asked them to keep on.
+        """
         pieces = self.outfit_pieces()
         if not pieces:
-            return None
+            return []
         st = self.state
         wardrobe = self.character.data["wardrobe"]
         lib = self.character.library
         declined = set(st.get("kept_on", []))
-
-        def ok(p):
-            if p.get("entry_id") in declined or self._slot(p) in MODEST_SLOTS:
-                return False
-            return self._decent(pieces, [q for q in pieces if q is not p])
-
         issues = {i for i, _ in self.outfit_issues()}
-        if "hot" in issues or WEATHER_WARMTH.get(st["weather"], 2) == 0:
-            warm = []
-            for p in pieces:
-                e = wardrobe.get(p.get("entry_id"), {})
-                w = lib.items.get(e.get("item_id"), {}).get("attrs", {}).get("warmth", 1)
-                if self._slot(p) in WARM_SLOTS and w >= 2 and ok(p):
-                    warm.append((w, p))
-            if warm:
-                return max(warm, key=lambda t: t[0])[1]["entry_id"], "hot"
+        need = WEATHER_WARMTH.get(st["weather"], 2)
+        target = ACTIVITY_FORMALITY.get(st["activity"], 1)
         removable = ACTIVITY_REMOVABLE.get(st["activity"], set())
+        out = []
         for p in pieces:
-            if self._slot(p) not in removable or not ok(p):
+            eid = p.get("entry_id")
+            slot = self._slot(p)
+            if eid in declined or slot in MODEST_SLOTS:
                 continue
-            e = wardrobe.get(p.get("entry_id"), {})
-            acts = lib.items.get(e.get("item_id"), {}).get("attrs", {}).get("activities", [])
-            if st["activity"] not in acts:
-                return p["entry_id"], "activity"
-        if allow_regret:
-            disliked = [(self._liking(p["entry_id"]), p) for p in pieces if ok(p)]
-            disliked = [t for t in disliked if t[0] < 0.4]
-            if disliked:
-                return min(disliked, key=lambda t: t[0])[1]["entry_id"], "regret"
-        return None
+            if not self._decent(pieces, [q for q in pieces if q is not p]):
+                continue
+            attrs = lib.items.get(wardrobe.get(eid, {}).get("item_id"), {}).get("attrs", {})
+            reasons = []
+            warmth = attrs.get("warmth", 1)
+            if ("hot" in issues or need == 0) and slot in WARM_SLOTS and warmth >= 2:
+                reasons.append((10 + 3 * (warmth - need), "hot"))
+            formality = attrs.get("formality", 1)
+            if "formal" in issues and formality - target >= 1.5:
+                reasons.append((8 + 3 * (formality - target), "formal"))
+            if slot in removable and st["activity"] not in attrs.get("activities", []):
+                reasons.append((6.0, "activity"))
+            if allow_regret:
+                liking = self._liking(eid)
+                if liking < 0.4:
+                    reasons.append((2 + 10 * (0.4 - liking), "regret"))
+            if reasons:
+                score, reason = max(reasons)
+                out.append((score, eid, reason))
+        out.sort(key=lambda t: -t[0])
+        return out
+
+    def removal_candidate(self, allow_regret: bool = True) -> tuple[str, str] | None:
+        """The least suitable piece the character would like to take off: (entry id, reason)."""
+        cands = self.removal_candidates(allow_regret)
+        return (cands[0][1], cands[0][2]) if cands else None
 
     def propose_removal(self, allow_regret: bool = True, tone: str | None = None) -> Reply | None:
         """The character asks to take something off. Nothing changes until :meth:`answer_proposal`."""
@@ -959,10 +978,14 @@ class Conversation:
         changes: dict[str, Any] = {}
         issues = self.outfit_issues()
         roll = self.rng.random()
-        if not st.get("pending_proposal") and self.rng.random() < 0.3:
-            proposal = self.propose_removal(allow_regret=self.rng.random() < 0.5, tone=tone)
-            if proposal:
-                return proposal
+        if not st.get("pending_proposal"):
+            # something unsuitable is still being worn: likely to ask (refused pieces are skipped, so
+            # the next request is about a different part); otherwise only now and then, maybe a regret
+            pressing = self.removal_candidate(allow_regret=False) is not None
+            if self.rng.random() < (0.6 if pressing else 0.15):
+                proposal = self.propose_removal(allow_regret=not pressing, tone=tone)
+                if proposal:
+                    return proposal
         if issues and issues[0][0] != "nothing" and roll < 0.35:
             text = self.react_to_outfit(tone) or self.say("init_share", tone)
         elif roll < 0.55:

@@ -33,7 +33,8 @@ NUMBERS = {
                                       "(0 = not at all; thin, metallic and silk pieces never darken)"),
     "physics": (1.0, 0.0, 1.0, "1 = hair / clothing physics (spring bones) on, 0 = off"),
     "physics stiffness": (1.0, 0.2, 3.0, "multiplies the model's spring-bone stiffness (higher = less floppy)"),
-    "wind strength": (1.0, 0.0, 3.0, "how strongly wind moves hair and clothing in Windy weather"),
+    "wind strength": (1.0, 0.0, 3.0, "multiplies the wind: a gentle breeze (level 0.5) in any weather, "
+                                     "gusty level-3 wind that changes direction when Windy (0 = no wind)"),
 }
 
 HEADER = """# Ultimate Outfitter - 3D preview settings (Interact tab)

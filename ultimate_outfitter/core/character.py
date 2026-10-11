@@ -15,7 +15,7 @@ from PIL import Image
 
 from .categories import CATEGORY_BY_NAME, CATEGORY_NAMES, O, Q, Question
 from .colors import extract_colors, extract_exact_colors, hex_to_rgb, palette_match, precision_to_threshold, rgb_to_hex, rgb_to_lab
-from .imaging import MIN_AUTO_ALPHA, apply_pattern, auto_mask, builtin_pattern, quantize_to_palette, shine_kind, foreground_mask, load_rgba, recolor_regions_multi, save_rgba
+from .imaging import MIN_AUTO_ALPHA, apply_pattern, avoid_same_colors, auto_mask, builtin_pattern, quantize_to_palette, shine_kind, foreground_mask, load_rgba, recolor_regions_multi, save_rgba
 from .patterns import load_pattern, pattern_score
 from .storage import Library, new_id, safe_name, unique_path, write_json_atomic
 from .traits import add_into, cosine, normalize
@@ -557,7 +557,8 @@ class Character:
     def render_piece(self, item: dict, palettes: list[dict], pattern: dict | None,
                      cache: dict | None = None, shine_out: list | None = None,
                      info_out: dict | None = None, lock: bool | None = None,
-                     auto_pattern: bool = True, shine: str | tuple | None = None) -> list[np.ndarray]:
+                     auto_pattern: bool = True, shine: str | tuple | None = None,
+                     print_scale: float | None = None) -> list[np.ndarray]:
         """Recolour (and optionally print) every image of an item the same way.
 
         * ``lock`` (default: the character's "lock_palette" setting, on by default) restricts
@@ -572,6 +573,8 @@ class Character:
         ``info_out`` receives {"pattern": dict or None} for an automatically added pattern.
         ``auto_pattern=False`` never adds that pattern. ``shine`` overrides the name rules:
         "none", or (kind, palette index) such as ("metallic", 0).
+        ``print_scale`` multiplies how many times a print repeats; None picks a varied scale per piece
+        (the same every time for the same item, palettes and print, so previews match the result).
         """
         cache = cache if cache is not None else {}
         if lock is None:
@@ -593,18 +596,33 @@ class Character:
                     continue
                 xs = np.flatnonzero(region.any(axis=0))
                 width = xs[-1] - xs[0] + 1
-                scale = max(0.05, width / max(repeats, 1) / pat.shape[1])
+                # never shrink a print below ~8 px per tile, or it disappears / loses its holes
+                scale = max(0.05, width / max(repeats, 1) / pat.shape[1], 8 / max(pat.shape[1], 1))
                 before = out.copy()
-                outs[i] = apply_pattern(out, region, pat, scale=scale, antialias=not lock, palette=colors,
-                                        blend="replace" if lock else "shaded", cutaway=cut,
-                                        offset=(int(xs[0]), 0))
+                opts = dict(scale=scale, antialias=not lock, palette=colors, blend="replace" if lock else "shaded",
+                            cutaway=cut, offset=(int(xs[0]), 0))
+                outs[i] = apply_pattern(out, region, pat, **opts)
+                # where the print actually lands (also where it happens to repeat the colour beneath)
+                probe = before.copy()
+                probe[..., :3] = (1, 254, 3)
+                coverage = np.any(apply_pattern(probe, region, pat, **opts)[..., :3] != probe[..., :3], axis=-1)
+                coverage &= region
+                if lock and coverage.any():
+                    outs[i] = quantize_to_palette(outs[i], coverage, colors)
+                # never print a palette colour on top of itself
+                outs[i] = avoid_same_colors(outs[i], before, coverage, colors)
                 printed = np.any(outs[i][..., :3] != before[..., :3], axis=-1) & region
-                if lock and printed.any():
-                    outs[i] = quantize_to_palette(outs[i], printed, colors)
                 if g is not None and pal_masks:
                     for gg in range(len(pal_masks[i])):
                         pal_masks[i][gg] &= ~printed
                     pal_masks[i][g] |= printed
+
+        if print_scale is None:
+            key = f"{item['id']}-{'-'.join(p['id'] for p in palettes)}-{(pattern or {}).get('id', '')}"
+            print_scale = random.Random(f"scale-{key}").choice([0.55, 0.7, 0.85, 1.0, 1.2, 1.45, 1.75])
+
+        def vary(repeats):
+            return max(1, int(round(repeats * print_scale)))
 
         if pattern:
             pat, cut = load_pattern(self.library, pattern)
@@ -613,7 +631,7 @@ class Character:
                      or pattern.get("attrs", {}).get("placement") == "whole")
             print_pattern(pat, cut, palettes[g]["colors"],
                           lambda i: masks[i] if whole or not primaries[i].any() else primaries[i] & masks[i],
-                          whole, pattern.get("attrs", {}).get("repeats", 6), g)
+                          whole, vary(pattern.get("attrs", {}).get("repeats", 6)), g)
         # palettes that coloured nothing (image has too few colours) get a pattern instead
         allow_auto, auto_pattern = auto_pattern, None
         if pal_masks and allow_auto:
@@ -633,7 +651,8 @@ class Character:
                         auto_pattern = {"id": f"builtin-{kind}", "name": kind.title(), "builtin": True}
                         pat, cut, repeats = builtin_pattern(kind), None, 8
                 base = [pm[0].copy() for pm in pal_masks]
-                print_pattern(pat, cut, palettes[g]["colors"], lambda i, b=base: b[i] & masks[i], False, repeats, g)
+                print_pattern(pat, cut, palettes[g]["colors"], lambda i, b=base: b[i] & masks[i], False,
+                              vary(repeats), g)
         if info_out is not None:
             info_out["pattern"] = auto_pattern
         # metallic / silk: masks only (the 3D preview draws the shine)
@@ -681,7 +700,7 @@ class Character:
                 info: dict = {}
                 outs = self.render_piece(item, combo, pattern, cache, shine_out=shine, info_out=info,
                                          lock=piece.get("lock"), auto_pattern=piece.get("auto_pattern", True),
-                                         shine=piece.get("shine"))
+                                         shine=piece.get("shine"), print_scale=piece.get("print_scale"))
             except OSError:
                 continue
             if pattern is None and info.get("pattern"):

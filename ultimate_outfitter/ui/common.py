@@ -76,6 +76,14 @@ class _ThumbCache:
 thumb_cache = _ThumbCache()
 
 
+def drop_down(combo, visible: int = 7):
+    """Make a combo box open as a list below itself (not over / above it, which can leave the screen),
+    scrolling when it has more than ``visible`` entries."""
+    combo.setStyleSheet("QComboBox { combobox-popup: 0; }")
+    combo.setMaxVisibleItems(visible)
+    return combo
+
+
 def placeholder(size: int) -> QPixmap:
     pm = QPixmap(size, size)
     pm.fill(QColor("#555"))

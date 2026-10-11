@@ -124,6 +124,12 @@ The app never overwrites files it creates automatically. If a name is taken, it 
    a print is added so the extra palettes are used: a suitable pattern from your library when one fits, otherwise
    simple dots / stripes / checks. The print's name is added to the file name.
 
+   **Prints:** automatically generated prints come in varied sizes (from about half to nearly twice the pattern's
+   usual size, the same every time for the same piece), but never smaller than about 8 pixels per tile. A print
+   never puts a palette colour on top of itself: where the print would use the same colour as the fabric beneath
+   (e.g. grey dots on the grey parts of a white / grey / black piece), it takes the palette's neighbouring colour
+   there instead, while on parts of another colour it may still use that grey.
+
    When colouring automatically, the app never touches pixels below 10% opacity, which leaves leftover
    cleanup specks alone. With a **shades of one colour** palette, the most neutral (middle) shade becomes the
    main colour, and the lighter and darker shades are used for highlights, shading and details.
@@ -173,7 +179,7 @@ Profiles are saved automatically and reopen with the app. *Open profile file…*
 * **Shop:** when you reject a piece and nothing else in the dresser fits, you can choose **Shop** as well as laundry
   or leaving the slot empty. The shop also appears when the wardrobe has nothing for an essential piece: there is a
   *Shop for missing pieces…* button above the outfit, and a *Shop* choice when no outfit can be made. The shop
-  suggests a random piece that suits the day, with a preview. It is any clothing item for that slot from your
+  suggests a random piece that suits the day and shows the palette(s) it would use. It is any clothing item for that slot from your
   collection, in random palettes from your library, sometimes with a print. It ignores the character's personality
   and wardrobe rules, but palettes you rejected as clashing for that slot are avoided. Shopping for a dress also
   offers tops and bottoms, and shopping for a top also offers dresses, even when other pieces are approved
@@ -181,13 +187,14 @@ Profiles are saved automatically and reopen with the app. *Open profile file…*
   another random piece, or **Buy** to create it: it is saved like any wardrobe piece, added to the dresser and
   worn in the current outfit (waiting for your approval).
 * **Edit this outfit…** (on the *Current outfit & history* page) changes the shown outfit, current or past:
-  *Add piece…*, *Replace…* (offers the same kind of piece first) and *Remove*. Added pieces must be clean, so they
+  *Add piece…*, *Replace…* and *Remove*. *Replace…* lists the same kind of piece first; any non-underwear piece
+  can be swapped for any other kind of non-underwear piece (underwear is swapped for underwear). Added pieces must be clean, so they
   come from the dresser and go to the hamper. Removed pieces stay in the hamper: editing never puts anything back
   in the dresser. The outfit's contact sheet is redrawn.
 
 ## F. Interact
 
-Pick a character to see them in a large **3D viewport** and chat with them. Planning a new outfit of the day in
+Pick a character (the list drops down and scrolls past 7 characters) to see them in a large **3D viewport** and chat with them. Planning a new outfit of the day in
 the Outfit Manager copies its answers (mood, activity, setting and weather) into the Interact tab and starts a
 fresh chat. The **Outfit** box picks which day's outfit is shown (the newest day is shown again after you plan a
 new one). The 3D model, the material effects and the character's comments follow the chosen outfit.
@@ -203,7 +210,8 @@ new one). The 3D model, the material effects and the character's comments follow
   *Time* can follow the computer's clock or be set to dawn, morning, day, evening or night.
 * **Background:** a sky that matches the time and weather, a solid colour, or any image.
 * **Expressions** follow the character's mood, and the chat adds short reactions such as laughing, blushing or
-  embarrassment. The eyes keep looking at the camera (you can turn this off), and the character blinks on their own.
+  embarrassment. The eyes follow the camera as you move around (you can turn this off), and the character blinks
+  on their own.
 * **Expressions config:** each character folder has an editable `expressions.txt`, which maps every mood and
   reaction to blend shapes and weights. You can use VRM expressions (`happy`, `sad`, `angry`, `relaxed`,
   `surprised`, `blink`, `aa`...) or raw VRoid blend shapes (`Fcl_ALL_Joy`, `Fcl_EYE_Close`...). Use *Edit
@@ -241,8 +249,10 @@ modified.
   wet, the model parts whose texture matched a **thin** wardrobe piece become about 70% opaque. Nothing is guessed
   from material names; a `materials.txt` rule can mark a part thin or thick by hand.
 * **Physics:** the model's spring bones (hair, skirts, ribbons...) swing with every movement. A gentle idle sway
-  keeps them alive when no animation is playing, they blow in the wind when it's **Windy** (a little in rain and
-  cold), and wet hair hangs heavier.
+  keeps them alive when no animation is playing, and wet hair hangs heavier.
+* **Wind:** there is always a gentle breeze (level 0.5). **Windy** weather blows at level 3 and can change
+  direction at any moment. Wind comes in gusts with lulls between them and its direction wanders, so it never
+  settles into a steady push. Bust physics are barely moved by wind.
 * **Preview settings…** opens `preview_settings.txt` in the library folder. It is shared by all characters:
 
   | Setting | Default | Meaning |
@@ -254,7 +264,7 @@ modified.
   | `wet darkening` | 0.25 | how much darker clothing, hair and accessories get while wet |
   | `physics` | 1 | spring-bone physics on (1) or off (0) |
   | `physics stiffness` | 1.0 | multiplies the model's spring stiffness |
-  | `wind strength` | 1.0 | how strongly wind moves hair and clothing |
+  | `wind strength` | 1.0 | multiplies the wind (breeze 0.5, Windy 3); 0 = no wind |
 
   The three shine settings take a level: `off`, `faint`, `very low`, `low`, `medium`, `high`, `full`, `extra` or
   `maximum` (or a number, 1 = full), e.g. `wet shine = low`. They apply to every character.
@@ -300,17 +310,22 @@ shy, confident, edgy, elegant, flirty, mysterious or laid-back, chosen from the 
 * **Let them talk:** the character takes the initiative. They may change their own plans or mood, comment on their
   outfit, share something, or ask you a question.
 * **Suggest an outfit change:** pick a piece they're wearing and ask them to **take it off** or **swap it for**
-  another piece, or suggest **putting on** a clean piece from the dresser. They decide in character. They are
+  another piece (any non-underwear piece can be offered for a non-underwear piece), or suggest **putting on** a clean piece from the dresser. They decide in character. They are
   more willing when the change fixes a problem (too warm, wrong for the activity...), when they like the new piece,
   and when they like you. They never take off underwear or swimwear, and never leave themselves uncovered in
   public.
-* **The character's own requests:** when a piece no longer suits the situation (a jacket in scorching heat, shoes
-  in bed, a coat at the gym...) or they regret wearing it, they may ask to take it off. This can happen with *Let
+* **The character's own requests:** when a piece no longer suits the situation (a jacket in scorching heat, a
+  blazer at home when overdressed, shoes in bed, a coat at the gym...) or they regret wearing it, they may ask to
+  take it off. They ask about the least suitable piece first (never underwear); if you refuse, they keep asking
+  about other pieces while the problem remains. This can happen with *Let
   them talk* or right after the weather or activity changes. A bar above the chat asks you to **Agree** or
   **Refuse**, and nothing changes until you agree. If you refuse, they won't ask about that piece again.
 * Accepted changes update the shown outfit: its piece list and contact sheet in the Outfit Manager, and the 3D
   model. Only the model parts whose texture matched the removed piece are **hidden**; nothing is hidden by name or
   type, so a piece whose texture wasn't found on the model stays visible.
+  The hidden parts are listed in a text file per outfit (`Outfits/Outfit-<date>-<id>-hidden.txt`, also opened by
+  **Hidden parts…**): delete a line and save to show a wrongly hidden part again, or add a material name to hide
+  it. Lines you delete stay deleted.
   Removed pieces stay in the hamper. Tip: VRoid Studio can delete body polygons hidden under clothing when it
   exports; turn that off if you want to see the body under removed pieces.
 

@@ -40,7 +40,7 @@ let envIntensity = 1;
 let matches = [];          // wardrobe pieces found among the model's textures (from Python)
 let effectOverlays = [];   // masked metallic / silk layers for matched pieces
 let outlines = [];         // MToon outline material slots: [{mesh, mat}]
-let hiddenEntries = new Set();   // wardrobe entry ids taken off - their model parts are hidden
+let hiddenMaterials = new Set();  // model parts hidden because their pieces were taken off (from Python)
 const maskLoader = new THREE.TextureLoader();
 
 export function init(r, s) {
@@ -266,7 +266,7 @@ function apply() {
     }
     // pieces taken off are hidden (with their outline and effect layers)
     // only model parts whose texture matched a removed wardrobe piece are hidden
-    e.hidden = !!(e.match && hiddenEntries.has(e.match.entry_id));
+    e.hidden = hiddenMaterials.has(e.name);
     mat.visible = !e.hidden;
     // gloss layer: wet = whole body, silk = sheen on silk parts only
     const g = e.gloss;
@@ -305,7 +305,7 @@ function apply() {
 }
 
 export function setHidden(h) {
-  hiddenEntries = new Set((h && h.entries) || []);
+  hiddenMaterials = new Set((h && h.materials) || []);
   apply();
   return entries.filter((e) => e.hidden).map((e) => e.name);
 }
