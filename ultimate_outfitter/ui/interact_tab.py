@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QFileDialog, QFormLayout,
+from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QFileDialog, QFormLayout, QFrame,
                                QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
                                QPlainTextEdit, QPushButton, QSplitter, QStackedWidget, QTextBrowser,
                                QVBoxLayout, QWidget)
@@ -208,11 +208,47 @@ class InteractTab(QWidget):
         b_clear.clicked.connect(self.clear_chat)
         sf.addRow(b_clear)
 
+        # ---- outfit suggestions (the character may agree or not)
+        clothes = QGroupBox("Suggest an outfit change")
+        cf = QFormLayout(clothes)
+        self.worn_combo = QComboBox()
+        self.worn_combo.setToolTip("A piece of the shown outfit")
+        b_off = QPushButton("Take it off?")
+        b_off.clicked.connect(self.suggest_remove)
+        b_swap = QPushButton("Swap it for…")
+        b_swap.setToolTip("Suggest a clean piece from the dresser instead")
+        b_swap.clicked.connect(self.suggest_swap)
+        row = QHBoxLayout()
+        row.addWidget(self.worn_combo, 1)
+        row.addWidget(b_off)
+        row.addWidget(b_swap)
+        cf.addRow("Wearing", row)
+        b_on = QPushButton("Suggest putting on…")
+        b_on.setToolTip("Suggest a clean piece from the dresser")
+        b_on.clicked.connect(self.suggest_add)
+        cf.addRow(b_on)
+        # the character asks to take something off: nothing changes until you agree
+        self.proposal_bar = QFrame()
+        self.proposal_bar.setStyleSheet("QFrame { background: rgba(240, 180, 40, 70); border-radius: 4px; }")
+        pb = QHBoxLayout(self.proposal_bar)
+        self.proposal_label = QLabel()
+        self.proposal_label.setWordWrap(True)
+        b_yes = QPushButton("Agree")
+        b_yes.clicked.connect(lambda: self.answer_proposal(True))
+        b_no = QPushButton("Refuse")
+        b_no.clicked.connect(lambda: self.answer_proposal(False))
+        pb.addWidget(self.proposal_label, 1)
+        pb.addWidget(b_yes)
+        pb.addWidget(b_no)
+        self.proposal_bar.hide()
+
         right = QVBoxLayout()
         right.addWidget(self.log, 1)
+        right.addWidget(self.proposal_bar)
         right.addLayout(entry_row)
         right.addWidget(talk)
         right.addWidget(suggest)
+        right.addWidget(clothes)
         rw = QWidget()
         rw.setLayout(right)
 
@@ -228,6 +264,7 @@ class InteractTab(QWidget):
 
         state.characters_changed.connect(self.refresh_characters)
         state.library_changed.connect(self._library_changed)
+        state.outfit_changed.connect(self._outfit_changed)
         self._fill_poses()
         self.refresh_characters()
 
@@ -295,6 +332,8 @@ class InteractTab(QWidget):
         self.time_combo.blockSignals(False)
         self.bg_combo.setCurrentIndex(max(0, self.bg_combo.findData(vs.get("background", {}).get("mode", "sky"))))
         self._fill_days()
+        self._fill_worn()
+        self._show_proposal()
         self._show_outfit()
         self._render_log()
         self._sync_view(reload_model=True)
@@ -420,7 +459,10 @@ class InteractTab(QWidget):
         worker = Worker(vrm_match.match_wardrobe, ch, path)
         worker.finished_ok.connect(done)
         worker.failed.connect(lambda msg: setattr(self, "match_info", f"Texture matching failed: {msg}"))
-        self._match_worker = worker  # keep a reference while it runs
+        # keep every running worker referenced until it ends (a QThread destroyed while running aborts)
+        self._workers = getattr(self, "_workers", set())
+        self._workers.add(worker)
+        worker.finished.connect(lambda w=worker: self._workers.discard(w))
         worker.start()
 
     def _apply_wet(self):
@@ -746,6 +788,11 @@ class InteractTab(QWidget):
             bits = [f"{k} → {v}" for k, v in reply.changes.items()]
             self.character.data["chat_log"].append({"t": 0, "who": "sys", "text": "(" + ", ".join(bits) + ")"})
             self.character.save()
+        if reply.outfit_change:
+            self._apply_outfit_change(reply.outfit_change)
+        if reply.changes:
+            self._apply_lighting()
+        self._show_proposal()
         self._show_status()
         self._render_log()
         self._play_reply(reply)
@@ -779,6 +826,88 @@ class InteractTab(QWidget):
     def initiative(self):
         if self.conv:
             self._after(self.conv.initiative())
+
+    # ------------------------------------------------------------ outfit changes
+    def _fill_worn(self):
+        self.worn_combo.clear()
+        outfit = (self.character.shown_outfit() if self.character else None) or {}
+        for p in outfit.get("pieces", []):
+            label = self.conv.piece_label(p["entry_id"]) if self.conv else p.get("name", "")
+            self.worn_combo.addItem(label, p["entry_id"])
+
+    def _pick_dresser(self, slot=None, title="Suggest putting on…"):
+        from .outfit_tab import PickPieceDialog
+        outfit = self.character.shown_outfit() or {}
+        dlg = PickPieceDialog(self, self.character, slot, exclude=[p["entry_id"] for p in outfit.get("pieces", [])],
+                              title=title)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            return dlg.chosen()
+        return None
+
+    def _has_outfit(self) -> bool:
+        if not self.conv or not self.character or not self.character.shown_outfit():
+            QMessageBox.information(self, "Outfit", "Plan an outfit in the Outfit Manager first.")
+            return False
+        return True
+
+    def suggest_remove(self):
+        eid = self.worn_combo.currentData()
+        if not self._has_outfit() or not eid:
+            return
+        self.conv.log_player(f"Why don't you take off the {self.conv.piece_label(eid)}?")
+        self._after(self.conv.respond_outfit(remove=[eid]))
+
+    def suggest_add(self):
+        if not self._has_outfit():
+            return
+        eid = self._pick_dresser()
+        if eid:
+            self.conv.log_player(f"How about putting on the {self.conv.piece_label(eid)}?")
+            self._after(self.conv.respond_outfit(add=[eid]))
+
+    def suggest_swap(self):
+        old = self.worn_combo.currentData()
+        if not self._has_outfit() or not old:
+            return
+        slot = self.character.data["wardrobe"].get(old, {}).get("slot")
+        new = self._pick_dresser(slot, f"Swap the {self.conv.piece_label(old)} for…")
+        if new:
+            self.conv.log_player(f"Swap the {self.conv.piece_label(old)} for the {self.conv.piece_label(new)}?")
+            self._after(self.conv.respond_outfit(remove=[old], add=[new]))
+
+    def _show_proposal(self):
+        p = self.conv.state.get("pending_proposal") if self.conv else None
+        if p:
+            self.proposal_label.setText(f"<b>{html.escape(self.character.name)}</b> wants to take off the "
+                                        f"<b>{html.escape(p.get('piece', ''))}</b>. Do you agree?")
+        self.proposal_bar.setVisible(bool(p))
+
+    def answer_proposal(self, agree: bool):
+        if not self.conv or not self.conv.state.get("pending_proposal"):
+            self.proposal_bar.hide()
+            return
+        self.conv.log_player("Sure, go ahead." if agree else "No, keep it on.")
+        self._after(self.conv.answer_proposal(agree))
+
+    def _apply_outfit_change(self, change: dict):
+        """An accepted change: update the outfit (the hamper keeps removed pieces) and the preview."""
+        if not self.conv.apply_change(change):
+            return
+        bits = [f"took off {self.conv.piece_label(e)}" for e in change.get("remove", [])]
+        bits += [f"put on {self.conv.piece_label(e)}" for e in change.get("add", [])]
+        self.character.data["chat_log"].append({"t": 0, "who": "sys", "text": "(" + ", ".join(bits) + ")"})
+        self.character.save()
+        self.state.outfit_changed.emit()
+
+    def _outfit_changed(self):
+        """Pieces of an outfit changed (here or in the Outfit Manager)."""
+        if not self.character:
+            return
+        self._fill_days()
+        self._fill_worn()
+        self._show_outfit()
+        self._apply_wet()
+        self._apply_hidden()
 
     def clear_chat(self):
         if self.character:

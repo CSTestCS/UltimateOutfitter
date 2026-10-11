@@ -496,16 +496,23 @@ def outfit_piece(entry: dict) -> dict:
             "palettes": entry["palette_names"], "file": entry["file"]}
 
 
-def edit_outfit(character: Character, outfit: dict, remove: list[str] = (), add: list[str] = ()) -> dict:
+def edit_outfit(character: Character, outfit: dict, remove: list[str] = (), add: list[str] = (),
+                reason: str = "edited") -> dict:
     """Change the pieces of a saved outfit.
 
     Removed pieces stay where they are (a worn piece stays in the hamper - editing never returns
     anything to the dresser). Added pieces must be clean: they move from the dresser to the hamper.
-    ``remove`` + ``add`` together replace a piece.
+    ``remove`` + ``add`` together replace a piece. Removed pieces are listed in ``outfit["removed"]``
+    (so the 3D preview can hide them on the model).
     """
     data = character.data
     wardrobe = data["wardrobe"]
     gone = set(remove)
+    removed = [r for r in outfit.get("removed", []) if r.get("entry_id") not in set(add)]
+    for p in outfit.get("pieces", []):
+        if p.get("entry_id") in gone and all(r.get("entry_id") != p.get("entry_id") for r in removed):
+            removed.append(dict(p, reason=reason, time=time.strftime("%Y-%m-%d %H:%M")))
+    outfit["removed"] = removed
     pieces = [p for p in outfit.get("pieces", []) if p.get("entry_id") not in gone]
     have = {p.get("entry_id") for p in pieces}
     for eid in add:

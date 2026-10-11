@@ -20,6 +20,7 @@ class AppState(QObject):
 
     library_changed = Signal()
     characters_changed = Signal()
+    outfit_changed = Signal()         # pieces of a saved outfit changed (no need to reload everything)
     open_in_editor = Signal(str)      # path
     open_in_upscaler = Signal(str)    # path
 

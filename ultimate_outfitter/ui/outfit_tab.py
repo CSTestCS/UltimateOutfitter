@@ -309,6 +309,7 @@ class OutfitTab(QWidget):
 
         state.characters_changed.connect(self.refresh_characters)
         state.library_changed.connect(self.refresh_characters)
+        state.outfit_changed.connect(self._outfit_changed)
         self.refresh_characters()
         self._render_proposal()
 
@@ -397,13 +398,19 @@ class OutfitTab(QWidget):
         if not remove and not add:
             return
         edit_outfit(ch, outfit, remove, add)
+        self.state.outfit_changed.emit()   # refreshes the dresser / hamper here and the Interact tab
+
+    def _outfit_changed(self):
+        shown = self.displayed_outfit
         row = self.history.currentRow()
-        self.state.characters_changed.emit()   # refreshes the dresser / hamper here and the Interact tab
+        self.refresh_lists()
         if row >= 0:
             self.history.blockSignals(True)
             self.history.setCurrentRow(row)
             self.history.blockSignals(False)
-        self._show_outfit(outfit)
+        if shown is not None and self.character and (shown is self.character.data.get("current_outfit")
+                                                     or shown in self.character.data["outfit_history"]):
+            self._show_outfit(shown)
 
     def _show_history(self, row):
         hist = self.character.data.get("outfit_history", []) if self.character else []

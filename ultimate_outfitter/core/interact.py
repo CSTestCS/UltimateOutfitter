@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .categories import ACTIVITIES, WEATHER, WEATHER_WARMTH
-from .outfit import ACTIVITY_FORMALITY, ACTIVITY_TRAITS, MOODS, SETTINGS, _parse
+from .outfit import ACTIVITY_FORMALITY, ACTIVITY_TRAITS, MOODS, SETTINGS, _parse, edit_outfit, outfit_piece
 from .traits import cosine
 
 # ---------------------------------------------------------------------------
@@ -322,6 +322,90 @@ TEMPLATES: dict[str, dict[str, list[str]]] = {
     "issue_formal": {"any": ["I feel so overdressed for {doing}.", "Wearing my {item} for {doing}? Bit much, huh?"]},
     "issue_casual": {"any": ["Oof, I'm way too casual for {doing}.", "Is my {item} too sloppy for {doing}?"]},
     "issue_nothing": {"any": ["I... don't actually have an outfit picked out yet.", "I haven't even got dressed yet!"]},
+    # outfit changes the player suggests ----------------------------------------------
+    "accept_remove": {
+        "any": ["Sure, I'll take off the {piece}.", "Okay, the {piece} can go.", "*takes off the {piece}* Better?"],
+        "shy": ["O-okay... I'll take off the {piece}."],
+        "confident": ["Fine. The {piece} goes. I look {good} either way."],
+        "edgy": ["Whatever. *pulls off the {piece}*"],
+        "elegant": ["Very well, I shall remove the {piece}."],
+        "flirty": ["Oh? You want the {piece} off? ...Alright~"],
+        "laidback": ["Sure, the {piece} was kinda annoying anyway."],
+    },
+    "decline_remove": {
+        "any": ["No, I'd rather keep the {piece} on.", "Hmm, no. I like the {piece}.", "The {piece} stays, {player}."],
+        "shy": ["I-I'd rather not... I'll keep the {piece} on."],
+        "edgy": ["Not happening. The {piece} stays."],
+        "elegant": ["I think not. The {piece} completes the look."],
+        "flirty": ["Nice try, {player}~ The {piece} stays on."],
+    },
+    "decline_modest": {
+        "any": ["What?! No way, not {where}!", "{player}! I'm not taking that off {where}!"],
+        "shy": ["Wh-what?! N-no! *covers up*"],
+        "flirty": ["{laugh} You wish, {player}. Not {where}~"],
+        "confident": ["Absolutely not. Nice try."],
+        "edgy": ["Are you serious? No."],
+    },
+    "accept_add": {
+        "any": ["Ooh, sure, I'll put on the {new_piece}.", "Good idea. *puts on the {new_piece}*",
+                "The {new_piece}? Okay!"],
+        "shy": ["Y-you think the {new_piece} would look nice? Okay..."],
+        "confident": ["The {new_piece}? Good eye. I'll wear it."],
+        "edgy": ["Fine, the {new_piece}. Happy?"],
+        "elegant": ["The {new_piece}, yes. An excellent choice."],
+        "flirty": ["The {new_piece}? For you, sure~"],
+    },
+    "decline_add": {
+        "any": ["The {new_piece}? Nah, not today.", "Hmm, I don't feel like wearing the {new_piece}.",
+                "No thanks, the {new_piece} isn't really me today."],
+        "edgy": ["The {new_piece}? Not a chance."],
+        "elegant": ["I'm afraid the {new_piece} wouldn't suit the occasion."],
+        "shy": ["Um... I'd rather not wear the {new_piece}..."],
+    },
+    "accept_swap": {
+        "any": ["Okay, swapping the {piece} for the {new_piece}.", "Sure! *changes the {piece} for the {new_piece}*"],
+        "confident": ["The {new_piece} instead of the {piece}? Yes, that's better."],
+        "elegant": ["Exchanging the {piece} for the {new_piece}. Agreed."],
+        "edgy": ["Ugh, fine. The {new_piece} it is."],
+    },
+    "decline_swap": {
+        "any": ["I'd rather keep the {piece} than wear the {new_piece}.", "No, the {piece} is fine."],
+        "edgy": ["No. The {piece} stays."],
+        "shy": ["U-um, I like the {piece} more..."],
+    },
+    # the character wants to take something off (needs the player's agreement) ---------
+    "propose_remove_hot": {
+        "any": ["It's so hot... would it be okay if I took off my {piece}?",
+                "Phew. Mind if I take off the {piece}? I'm melting."],
+        "shy": ["U-um... it's really warm... can I take off my {piece}?"],
+        "confident": ["It's too hot for the {piece}. I'm taking it off - unless you object?"],
+        "edgy": ["This {piece} is killing me in this heat. Taking it off, okay?"],
+        "elegant": ["Pardon me, the heat is rather much. May I remove my {piece}?"],
+    },
+    "propose_remove_activity": {
+        "any": ["The {piece} isn't great for {doing}. Can I take it off?",
+                "Hmm, the {piece} is in the way for {doing}. Okay if I take it off?"],
+        "shy": ["The {piece} is kind of awkward for {doing}... can I take it off?"],
+        "confident": ["The {piece} has to go for {doing}. Agreed?"],
+    },
+    "propose_remove_regret": {
+        "any": ["Honestly, I regret wearing this {piece}. Can I take it off?",
+                "I don't know why I put on the {piece} today... mind if I take it off?"],
+        "shy": ["I-I think the {piece} was a mistake... can I take it off?"],
+        "confident": ["The {piece} isn't working. I'm taking it off - okay?"],
+        "edgy": ["This {piece} was a bad call. It's coming off, alright?"],
+        "elegant": ["I'm afraid the {piece} was an error of judgement. May I remove it?"],
+    },
+    "removal_agreed": {
+        "any": ["Thanks! *takes off the {piece}*", "Ahh, much better.", "*removes the {piece}* There."],
+        "shy": ["Th-thanks... *takes off the {piece}*"],
+        "edgy": ["Finally. *tosses the {piece} aside*"],
+    },
+    "removal_refused": {
+        "any": ["Okay, okay... I'll keep the {piece} on.", "Fine. The {piece} stays.", "*sighs* Alright."],
+        "edgy": ["Tch. Fine."],
+        "shy": ["O-okay... sorry."],
+    },
     # initiative ----------------------------------------------------------------------
     "init_question": {
         "any": ["So, {player}, what have you been up to?", "Hey {player}, what's your favourite colour?",
@@ -440,6 +524,11 @@ KEY_EMOTES: dict[str, tuple[str, str | None]] = {
     "issue_formal": ("embarrassed", "Embarrassed"), "issue_casual": ("embarrassed", "Embarrassed"),
     "init_bored": ("stretch", None), "init_mood": ("surprised", "Surprised"), "change_mood": ("surprised", None),
     "init_share": ("talk", None), "outfit_ok": ("proud", None),
+    "accept_remove": ("nod", None), "accept_add": ("nod", None), "accept_swap": ("nod", None),
+    "decline_remove": ("shake_head", None), "decline_add": ("shake_head", None), "decline_swap": ("shake_head", None),
+    "decline_modest": ("embarrassed", "Embarrassed"), "propose_remove_hot": ("fan", None),
+    "propose_remove_activity": ("think", "Thinking"), "propose_remove_regret": ("think", "Thinking"),
+    "removal_agreed": ("happy", None), "removal_refused": ("sad", None),
 }
 TONE_EMOTES: dict[tuple[str, str], tuple[str, str | None]] = {
     ("compliment_outfit", "shy"): ("blush", "Blushing"), ("compliment_them", "shy"): ("blush", "Blushing"),
@@ -453,6 +542,22 @@ TONE_EMOTES: dict[tuple[str, str], tuple[str, str | None]] = {
 }
 
 
+# outfit slots the character never takes off in conversation, and the slots that keep them covered
+MODEST_SLOTS = {"underwear_bottom", "bra", "swim_bottom", "swim_top", "swim_full"}
+COVERING_SLOTS = {"base_top", "legs", "full_body", "sleepwear", "outer", "mid_layer"}
+# slots that can come off when it's hot / for an activity
+WARM_SLOTS = {"outer", "mid_layer", "neck", "hands", "head", "cape", "arms", "legwear", "socks", "leg_warmers"}
+ACTIVITY_REMOVABLE = {
+    "Sleeping": {"outer", "mid_layer", "footwear", "head", "neck", "tie", "hands", "cape", "jewelry", "bag", "eyes",
+                 "waist", "wrists", "legwear", "socks", "armor", "harness", "apron", "corset"},
+    "Swimming / beach": {"outer", "mid_layer", "footwear", "neck", "tie", "hands", "cape", "socks", "legwear",
+                         "leg_warmers", "base_top", "legs", "full_body", "armor", "bag"},
+    "Workout / sports": {"outer", "cape", "neck", "tie", "jewelry", "bag", "head", "armor", "apron"},
+    "Combat / battle": {"cape", "neck", "tie", "bag", "jewelry", "apron"},
+    "Lounging at home": {"outer", "footwear", "head", "hands", "cape", "bag", "armor", "tie"},
+}
+
+
 @dataclass
 class Reply:
     text: str
@@ -460,6 +565,8 @@ class Reply:
     emote: str = "talk"              # emote event for the 3D viewport
     reaction: str | None = None      # short facial reaction (expressions.txt name)
     tone: str = ""
+    outfit_change: dict | None = None   # {"remove": [entry ids], "add": [entry ids], "reason": str} - apply it
+    proposal: dict | None = None        # a change the character asks for - only after the player agrees
 
 
 class Conversation:
@@ -565,9 +672,9 @@ class Conversation:
         return self._fill(self.rng.choice(options), tone, extra)
 
     # ------------------------------------------------------------------ outfit check
-    def outfit_issues(self) -> list[tuple[str, str]]:
-        """Return [(issue, detail)] for the current outfit and state."""
-        pieces = self.outfit_pieces()
+    def outfit_issues(self, pieces: list[dict] | None = None) -> list[tuple[str, str]]:
+        """Return [(issue, detail)] for the current outfit (or ``pieces``) and state."""
+        pieces = self.outfit_pieces() if pieces is None else pieces
         st = self.state
         if not pieces:
             return [("nothing", "")]
@@ -622,6 +729,163 @@ class Conversation:
             return self.say(key, tone)
         return self.say(f"issue_{issue}", tone)
 
+    # ------------------------------------------------------------------ outfit changes
+    UPPER = {"bra", "swim_top", "swim_full", "base_top", "full_body", "sleepwear", "mid_layer", "outer"}
+    LOWER = {"underwear_bottom", "swim_bottom", "swim_full", "legs", "full_body", "sleepwear"}
+
+    def _slot(self, p: dict) -> str:
+        return p.get("slot") or self.character.data["wardrobe"].get(p.get("entry_id"), {}).get("slot", "")
+
+    def _after_change(self, remove=(), add=()) -> list[dict]:
+        wardrobe = self.character.data["wardrobe"]
+        pieces = [p for p in self.outfit_pieces() if p.get("entry_id") not in set(remove)]
+        pieces += [outfit_piece(wardrobe[e]) for e in add if e in wardrobe]
+        return pieces
+
+    def _decent(self, before: list[dict], after: list[dict]) -> bool:
+        """Would the change leave the character uncovered?"""
+        b = {self._slot(p) for p in before}
+        a = {self._slot(p) for p in after}
+        if b & self.UPPER and not a & self.UPPER:
+            return False
+        if b & self.LOWER and not a & self.LOWER:
+            return False
+        if self.state["setting"] == "Public" and b & COVERING_SLOTS and not a & COVERING_SLOTS:
+            return False
+        return True
+
+    def piece_label(self, entry_id: str) -> str:
+        e = self.character.data["wardrobe"].get(entry_id)
+        if not e:
+            return "that"
+        pal = e.get("palette_names") or []
+        return (f"{pal[0]} " if pal else "") + e["item_name"]
+
+    def _liking(self, entry_id: str) -> float:
+        """0-1: how much the character likes a wardrobe piece."""
+        e = self.character.data["wardrobe"].get(entry_id, {})
+        item = self.character.library.items.get(e.get("item_id"))
+        if item is not None:
+            return max(0.0, min(1.0, self.character.rate_item(item) / 100))
+        return max(0.0, min(1.0, e.get("rating", 50) / 100))
+
+    def respond_outfit(self, remove: list[str] = (), add: list[str] = ()) -> Reply:
+        """The player suggests taking off ``remove`` and / or putting on ``add`` (a swap when both)."""
+        tone = self.tone()
+        st = self.state
+        remove, add = list(remove), list(add)
+        kind = "swap" if remove and add else ("remove" if remove else "add")
+        extra = {"piece": _join([self.piece_label(e) for e in remove]) or "that",
+                 "new_piece": _join([self.piece_label(e) for e in add]) or "that"}
+        before = self.outfit_pieces()
+        after = self._after_change(remove, add)
+        if remove:
+            slots_out = {self._slot(p) for p in before if p.get("entry_id") in remove}
+            slots_in = {self._slot(p) for p in after} - {self._slot(p) for p in before if p.get("entry_id") not in remove}
+            modest = bool(slots_out & MODEST_SLOTS) and not slots_out & MODEST_SLOTS <= slots_in
+            if modest or not self._decent(before, after):
+                st["affinity"] = max(-10.0, st["affinity"] - 0.5)
+                return self._finish("suggest_outfit", self.say("decline_modest", tone, extra), {})
+        old_issues = len([i for i in self.outfit_issues(before) if i[0] != "nothing"])
+        new_issues = len([i for i in self.outfit_issues(after) if i[0] != "nothing"])
+        chance = 0.5 + 0.2 * (old_issues - new_issues) + 0.03 * st["affinity"]
+        for e in add:
+            chance += 0.5 * (self._liking(e) - 0.4)
+        for e in remove:
+            chance += 0.3 * (0.5 - self._liking(e))
+        if tone in ("laidback", "cheerful", "flirty"):
+            chance += 0.08
+        elif tone in ("edgy", "confident"):
+            chance -= 0.08
+        chance = max(0.05, min(0.95, chance))
+        if self.rng.random() < chance:
+            text = self.say(f"accept_{kind}", tone, extra)
+            reply = self._finish("suggest_outfit", text, {})
+            reply.outfit_change = {"remove": remove, "add": add, "reason": "suggested"}
+            return reply
+        return self._finish("suggest_outfit", self.say(f"decline_{kind}", tone, extra), {})
+
+    def removal_candidate(self, allow_regret: bool = True) -> tuple[str, str] | None:
+        """A piece the character would like to take off: (entry id, reason hot | activity | regret)."""
+        pieces = self.outfit_pieces()
+        if not pieces:
+            return None
+        st = self.state
+        wardrobe = self.character.data["wardrobe"]
+        lib = self.character.library
+        declined = set(st.get("kept_on", []))
+
+        def ok(p):
+            if p.get("entry_id") in declined or self._slot(p) in MODEST_SLOTS:
+                return False
+            return self._decent(pieces, [q for q in pieces if q is not p])
+
+        issues = {i for i, _ in self.outfit_issues()}
+        if "hot" in issues or WEATHER_WARMTH.get(st["weather"], 2) == 0:
+            warm = []
+            for p in pieces:
+                e = wardrobe.get(p.get("entry_id"), {})
+                w = lib.items.get(e.get("item_id"), {}).get("attrs", {}).get("warmth", 1)
+                if self._slot(p) in WARM_SLOTS and w >= 2 and ok(p):
+                    warm.append((w, p))
+            if warm:
+                return max(warm, key=lambda t: t[0])[1]["entry_id"], "hot"
+        removable = ACTIVITY_REMOVABLE.get(st["activity"], set())
+        for p in pieces:
+            if self._slot(p) not in removable or not ok(p):
+                continue
+            e = wardrobe.get(p.get("entry_id"), {})
+            acts = lib.items.get(e.get("item_id"), {}).get("attrs", {}).get("activities", [])
+            if st["activity"] not in acts:
+                return p["entry_id"], "activity"
+        if allow_regret:
+            disliked = [(self._liking(p["entry_id"]), p) for p in pieces if ok(p)]
+            disliked = [t for t in disliked if t[0] < 0.4]
+            if disliked:
+                return min(disliked, key=lambda t: t[0])[1]["entry_id"], "regret"
+        return None
+
+    def propose_removal(self, allow_regret: bool = True, tone: str | None = None) -> Reply | None:
+        """The character asks to take something off. Nothing changes until :meth:`answer_proposal`."""
+        cand = self.removal_candidate(allow_regret)
+        if not cand:
+            return None
+        eid, reason = cand
+        tone = tone or self.tone()
+        text = self.say(f"propose_remove_{reason}", tone, {"piece": self.piece_label(eid)})
+        proposal = {"remove": [eid], "add": [], "reason": reason, "piece": self.piece_label(eid)}
+        self.state["pending_proposal"] = proposal
+        reply = self._finish("propose_remove", text, {})
+        reply.proposal = proposal
+        return reply
+
+    def answer_proposal(self, agree: bool) -> Reply:
+        """The player's answer to the pending proposal. On agreement the reply carries the outfit change."""
+        tone = self.tone()
+        st = self.state
+        proposal = st.pop("pending_proposal", None) or {"remove": [], "add": [], "piece": "that"}
+        extra = {"piece": proposal.get("piece", "that")}
+        if agree:
+            st["affinity"] = min(10.0, st["affinity"] + 0.5)
+            reply = self._finish("answer_proposal", self.say("removal_agreed", tone, extra), {})
+            reply.outfit_change = {"remove": proposal.get("remove", []), "add": proposal.get("add", []),
+                                   "reason": proposal.get("reason", "")}
+            return reply
+        st.setdefault("kept_on", []).extend(proposal.get("remove", []))   # don't ask again about it
+        changes = {}
+        if proposal.get("reason") == "hot" and self.rng.random() < 0.5:
+            st["mood"] = "Grumpy / dark"
+            changes["mood"] = st["mood"]
+        return self._finish("answer_proposal", self.say("removal_refused", tone, extra), changes)
+
+    def apply_change(self, change: dict) -> dict | None:
+        """Apply an accepted outfit change to the shown outfit (the hamper keeps removed pieces)."""
+        outfit = self.character.shown_outfit()
+        if not outfit or not change:
+            return None
+        return edit_outfit(self.character, outfit, change.get("remove", []), change.get("add", []),
+                           reason=change.get("reason") or "chat")
+
     # ------------------------------------------------------------------ actions
     def respond(self, intent: str, **kwargs) -> Reply:
         """Player action -> character reply."""
@@ -640,6 +904,7 @@ class Conversation:
                 follow = self.react_to_outfit(tone)
                 if follow:
                     text += " " + follow
+                return self._with_proposal(intent, text, changes, tone)
             else:
                 text = self.say("decline_activity", tone, extra)
             return self._finish(intent, text, changes)
@@ -665,7 +930,7 @@ class Conversation:
             st["weather"] = kwargs["weather"]
             changes["weather"] = st["weather"]
             text = self.react_to_outfit(tone, always=True) or self.say("init_share", tone)
-            return self._finish(intent, text, changes)
+            return self._with_proposal(intent, text, changes, tone)
 
         text = self.say(intent, tone)
         if intent == "ask_outfit":
@@ -694,6 +959,10 @@ class Conversation:
         changes: dict[str, Any] = {}
         issues = self.outfit_issues()
         roll = self.rng.random()
+        if not st.get("pending_proposal") and self.rng.random() < 0.3:
+            proposal = self.propose_removal(allow_regret=self.rng.random() < 0.5, tone=tone)
+            if proposal:
+                return proposal
         if issues and issues[0][0] != "nothing" and roll < 0.35:
             text = self.react_to_outfit(tone) or self.say("init_share", tone)
         elif roll < 0.55:
@@ -718,6 +987,19 @@ class Conversation:
         else:
             text = self.say("init_share", tone)
         return self._finish("initiative", text, changes)
+
+    def _with_proposal(self, intent: str, text: str, changes: dict, tone: str) -> Reply:
+        """Finish a reply, adding a request to take something off when the new situation calls for it."""
+        cand = None if self.state.get("pending_proposal") else self.removal_candidate(allow_regret=False)
+        if cand and self.rng.random() < 0.7:
+            eid, reason = cand
+            text += " " + self.say(f"propose_remove_{reason}", tone, {"piece": self.piece_label(eid)})
+            proposal = {"remove": [eid], "add": [], "reason": reason, "piece": self.piece_label(eid)}
+            self.state["pending_proposal"] = proposal
+            reply = self._finish(intent, text, changes)
+            reply.proposal = proposal
+            return reply
+        return self._finish(intent, text, changes)
 
     def _finish(self, intent: str, text: str, changes: dict) -> Reply:
         log = self.character.data["chat_log"]

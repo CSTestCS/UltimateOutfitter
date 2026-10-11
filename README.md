@@ -268,6 +268,20 @@ shy, confident, edgy, elegant, flirty, mysterious or laid-back, chosen from the 
   in character: shy ones get embarrassed, others get frustrated, shrug it off, joke, or tease you.
 * **Let them talk:** the character takes the initiative. They may change their own plans or mood, comment on their
   outfit, share something, or ask you a question.
+* **Suggest an outfit change:** pick a piece they're wearing and ask them to **take it off** or **swap it for**
+  another piece, or suggest **putting on** a clean piece from the dresser. They decide in character. They are
+  more willing when the change fixes a problem (too warm, wrong for the activity...), when they like the new piece,
+  and when they like you. They never take off underwear or swimwear, and never leave themselves uncovered in
+  public.
+* **The character's own requests:** when a piece no longer suits the situation (a jacket in scorching heat, shoes
+  in bed, a coat at the gym...) or they regret wearing it, they may ask to take it off. This can happen with *Let
+  them talk* or right after the weather or activity changes. A bar above the chat asks you to **Agree** or
+  **Refuse**, and nothing changes until you agree. If you refuse, they won't ask about that piece again.
+* Accepted changes update the shown outfit: its piece list and contact sheet in the Outfit Manager, and the 3D
+  model. The model parts that use a removed piece's texture are **hidden**. If no texture matched the piece, parts
+  named after it are hidden instead (e.g. *Tops* for a shirt, unless another worn piece also uses that name).
+  Removed pieces stay in the hamper. Tip: VRoid Studio can delete body polygons hidden under clothing when it
+  exports; turn that off if you want to see the body under removed pieces.
 
 ## E. Upscaler
 

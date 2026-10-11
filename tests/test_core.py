@@ -370,7 +370,8 @@ def test_conversation_engine(lib, tmp_path):
     conv = Conversation(ch, "Sam", random.Random(3))
     assert conv.state["setting"] == "Private / at home"
     for intent in TEMPLATES:
-        if intent.startswith(("issue_", "init_", "accept_", "decline_")) or intent in ("outfit_ok", "change_mood"):
+        if intent.startswith(("issue_", "init_", "accept_", "decline_", "propose_", "removal_")) or \
+                intent in ("outfit_ok", "change_mood"):
             continue
         r = conv.respond(intent)
         assert r.text and "{" not in r.text, (intent, r.text)
@@ -704,3 +705,57 @@ def test_preview_settings_and_wet_rules(lib, tmp_path):
     ch.data["current_outfit"] = {"id": "o1", "pieces": [{"slot": "legs", "name": "Jeans", "entry_id": "x"}]}
     words = material_rules.removed_keywords(ch, [{"slot": "base_top", "name": "Striped Shirt", "entry_id": "y"}])
     assert "shirt" in words and "striped" in words and "tops" in words and "bottoms" not in words
+
+
+def test_outfit_changes_in_conversation(lib, tmp_path):
+    import random
+    from ultimate_outfitter.core.interact import TEMPLATES, Conversation
+    cats = ["Underwear Bottoms", "Bras", "Shirts", "Pants", "Shoes", "Jackets", "Shirts"]
+    ch = _wardrobe_char(lib, tmp_path, cats)
+    s = OutfitSession(ch, DayContext("Casual / errands", "Calm", "Cold"))
+    s.build(allow_incomplete=True)
+    for e in s.in_use():
+        s.approve(e)
+    outfit = s.finalize()
+    conv = Conversation(ch, "Sam", random.Random(1))
+    w = ch.data["wardrobe"]
+    by_slot = {p["slot"]: p["entry_id"] for p in outfit["pieces"]}
+    # never takes off underwear, never leaves themselves uncovered in public
+    for _ in range(10):
+        r = conv.respond_outfit(remove=[by_slot["bra"]])
+        assert r.outfit_change is None and "{" not in r.text
+    conv.state["setting"] = "Public"
+    if "base_top" in by_slot:
+        r = conv.respond_outfit(remove=[by_slot["base_top"]] + ([by_slot["outer"]] if "outer" in by_slot else []))
+        assert r.outfit_change is None
+    # adding / swapping: accepted sometimes, applied to the shown outfit, dresser -> hamper
+    spare = next(e for e in ch.data["dresser"] if w[e]["slot"] == "base_top")
+    accepted = None
+    for _ in range(40):
+        r = conv.respond_outfit(add=[spare])
+        assert "{" not in r.text
+        if r.outfit_change:
+            accepted = r
+            break
+    assert accepted
+    conv.apply_change(accepted.outfit_change)
+    assert spare in [p["entry_id"] for p in outfit["pieces"]] and spare in ch.data["hamper"]
+    # the character asks to take off the jacket in scorching heat; nothing changes until the player agrees
+    jacket = by_slot["outer"]
+    lib.items[w[jacket]["item_id"]]["attrs"]["warmth"] = 3
+    if jacket:
+        conv.state["weather"] = "Scorching hot"
+        r = conv.propose_removal(allow_regret=False)
+        assert r and r.proposal and r.proposal["remove"] == [jacket] and r.proposal["reason"] == "hot"
+        assert jacket in [p["entry_id"] for p in outfit["pieces"]]
+        no = conv.answer_proposal(False)
+        assert no.outfit_change is None and conv.removal_candidate(allow_regret=False) != (jacket, "hot")
+        conv.state["kept_on"] = []
+        conv.propose_removal(allow_regret=False)
+        yes = conv.answer_proposal(True)
+        conv.apply_change(yes.outfit_change)
+        assert jacket not in [p["entry_id"] for p in outfit["pieces"]]
+        assert jacket in ch.data["hamper"] and jacket not in ch.data["dresser"]
+        assert [r["entry_id"] for r in outfit["removed"]] == [jacket]
+    for key in ("accept_remove", "decline_modest", "propose_remove_regret", "removal_refused"):
+        assert TEMPLATES[key]["any"]
