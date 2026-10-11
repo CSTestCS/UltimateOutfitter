@@ -12,9 +12,9 @@ from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDialog, QDia
 
 from ..core.categories import ACTIVITIES, SLOTS, WEATHER
 from ..core.character import Character, list_characters
-from ..core.outfit import (MOODS, REJECT_REASONS, SETTINGS, DayContext, NoOutfitPossible, OutfitSession, do_laundry,
-                           edit_outfit)
-from .common import AppState, Gallery, thumb_cache
+from ..core.outfit import (MOODS, REJECT_REASONS, SETTINGS, DayContext, NoOutfitPossible, OutfitSession, buy,
+                           do_laundry, edit_outfit, shop_offer)
+from .common import AppState, Gallery, array_to_pixmap, thumb_cache
 
 
 class DayDialog(QDialog):
@@ -88,6 +88,80 @@ class RejectDialog(QDialog):
 
     def reason(self) -> str:
         return self.group.checkedButton().property("key")
+
+
+class ShopDialog(QDialog):
+    """Random new pieces for a slot the wardrobe can't fill: Shop again for another, Buy to create it."""
+
+    def __init__(self, parent, session: OutfitSession, slot: str):
+        super().__init__(parent)
+        self.session = session
+        self.slot = slot
+        self.entry: dict | None = None
+        self.offer: dict | None = None
+        self.cache: dict = {}
+        self.rng = random.Random()
+        self.setWindowTitle(f"Shop — {SLOTS.get(slot, slot)}")
+        self.preview = QLabel()
+        self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview.setMinimumSize(340, 340)
+        self.info = QLabel()
+        self.info.setWordWrap(True)
+        note = QLabel("A random piece that suits today. It doesn't follow the character's wardrobe rules. "
+                      "<b>Shop</b> shows another one; <b>Buy</b> creates it and adds it to the wardrobe and outfit.")
+        note.setWordWrap(True)
+        b_shop = QPushButton("Shop")
+        b_shop.clicked.connect(self.next_offer)
+        self.b_buy = QPushButton("Buy")
+        self.b_buy.setStyleSheet("font-weight:bold; padding:6px 14px;")
+        self.b_buy.clicked.connect(self.buy)
+        b_cancel = QPushButton("Cancel")
+        b_cancel.clicked.connect(self.reject)
+        row = QHBoxLayout()
+        row.addWidget(b_shop)
+        row.addStretch(1)
+        row.addWidget(b_cancel)
+        row.addWidget(self.b_buy)
+        lay = QVBoxLayout(self)
+        lay.addWidget(note)
+        lay.addWidget(self.preview, 1)
+        lay.addWidget(self.info)
+        lay.addLayout(row)
+        self.next_offer()
+
+    def next_offer(self):
+        from PySide6.QtWidgets import QApplication
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            self.offer = shop_offer(self.session, self.slot, self.rng)
+            if not self.offer:
+                self.preview.setText("The collection has no clothing items for this slot.\n"
+                                     "Add some in A. Collection (and at least one palette).")
+                self.info.clear()
+                self.b_buy.setEnabled(False)
+                return
+            item, pals, pat = self.offer["item"], self.offer["palettes"], self.offer["pattern"]
+            try:
+                outs = self.session.character.render_piece(item, pals, pat, self.cache)
+                self.preview.setPixmap(array_to_pixmap(outs[0]).scaled(
+                    340, 340, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            except OSError as exc:
+                self.preview.setText(f"Preview failed: {exc}")
+            self.info.setText(f"<b>{item['name']}</b> ({item['category']})<br>Palettes: "
+                              + " + ".join(p["name"] for p in pals)
+                              + (f"<br>Print: {pat['name']}" if pat else ""))
+            self.b_buy.setEnabled(True)
+        finally:
+            QApplication.restoreOverrideCursor()
+
+    def buy(self):
+        if not self.offer:
+            return
+        self.entry = buy(self.session.character, self.offer)
+        if self.entry:
+            self.accept()
+        else:
+            QMessageBox.warning(self, "Shop", "The piece could not be created (is its image missing?).")
 
 
 class PickPieceDialog(QDialog):
@@ -260,8 +334,12 @@ class OutfitTab(QWidget):
         self.b_accept.clicked.connect(self.accept_outfit)
         self.b_reroll = QPushButton("Start over")
         self.b_reroll.clicked.connect(self.reroll)
+        self.b_shop = QPushButton("Shop for missing pieces…")
+        self.b_shop.setToolTip("The wardrobe has nothing for some essential pieces: shop for new ones")
+        self.b_shop.clicked.connect(self.shop_missing)
         br = QHBoxLayout()
         br.addWidget(self.b_reroll)
+        br.addWidget(self.b_shop)
         br.addStretch(1)
         br.addWidget(self.b_approve_all)
         br.addWidget(self.b_accept)
@@ -452,14 +530,25 @@ class OutfitTab(QWidget):
                                   "dresser, or wear what is available now?", parent=self)
                 b_laundry = box.addButton("Do laundry", QMessageBox.ButtonRole.AcceptRole)
                 b_partial = box.addButton("Wear what's available", QMessageBox.ButtonRole.ActionRole)
+                b_shop = box.addButton("Shop", QMessageBox.ButtonRole.ActionRole) if exc.shop_slots else None
                 box.addButton(QMessageBox.StandardButton.Cancel)
                 box.exec()
+                if b_shop is not None and box.clickedButton() is b_shop:
+                    if self._shop_slots(exc.shop_slots):
+                        self._build()
+                        return
                 if box.clickedButton() is b_laundry:
                     do_laundry(self.session.character)
                     self.state.characters_changed.emit()
                     self._build()
                     return
                 if box.clickedButton() is b_partial:
+                    self._build(allow_incomplete=True)
+                    return
+            elif exc.shop_slots:
+                r = QMessageBox.question(self, "Outfit", f"{self.session.character.name} has nothing to wear "
+                                         "for this right now.\n" + msg + "\n\nGo shopping for the missing pieces?")
+                if r == QMessageBox.StandardButton.Yes and self._shop_slots(exc.shop_slots):
                     self._build(allow_incomplete=True)
                     return
             else:
@@ -485,6 +574,7 @@ class OutfitTab(QWidget):
         self.b_accept.setEnabled(bool(s and s.all_approved()))
         self.b_approve_all.setEnabled(bool(s and s.pending()))
         self.b_reroll.setEnabled(bool(s))
+        self.b_shop.setVisible(bool(s and s.shop_slots))
         if not s:
             self.context_label.setText("Press “Plan today's outfit…” to have an outfit picked from the dresser.")
             return
@@ -545,18 +635,42 @@ class OutfitTab(QWidget):
         slot = self.session.slot_of(eid)
         new = self.session.reject(eid, reason)
         if new is None and reason != "unnecessary":
-            r = QMessageBox.question(
-                self, "No alternative",
-                f"There is nothing else suitable for “{SLOTS.get(slot, slot)}” in the dresser.\n"
-                "Request laundry to return worn items to the dresser and try again?\n"
-                "(No = leave this slot empty)")
-            if r == QMessageBox.StandardButton.Yes:
+            box = QMessageBox(QMessageBox.Icon.Question, "No alternative",
+                              f"There is nothing else suitable for “{SLOTS.get(slot, slot)}” in the dresser.\n"
+                              "Do laundry to return worn items to the dresser, shop for a new piece, "
+                              "or leave this slot empty?", parent=self)
+            b_laundry = box.addButton("Do laundry", QMessageBox.ButtonRole.AcceptRole)
+            b_shop = box.addButton("Shop", QMessageBox.ButtonRole.ActionRole)
+            box.addButton("Leave empty", QMessageBox.ButtonRole.RejectRole)
+            box.exec()
+            if box.clickedButton() is b_laundry:
                 do_laundry(self.session.character)
                 cands = self.session.candidates(slot)
                 if cands:
                     self.session.proposal.setdefault(slot, []).append(cands[0][1]["id"])
                 self.state.characters_changed.emit()
+            elif box.clickedButton() is b_shop:
+                self._shop_slots([slot])
         self._render_proposal()
+
+    def _shop_slots(self, slots: list[str]) -> bool:
+        """Open the shop for each slot in turn. Returns True if anything was bought."""
+        bought = False
+        for slot in list(dict.fromkeys(slots)):
+            dlg = ShopDialog(self, self.session, slot)
+            if dlg.exec() == QDialog.DialogCode.Accepted and dlg.entry:
+                if self.session.proposal:     # an outfit is being put together: wear it right away
+                    self.session.add_bought(slot, dlg.entry["id"])
+                bought = True
+        if bought:
+            self.refresh_lists()
+            self.state.characters_changed.emit()
+        return bought
+
+    def shop_missing(self):
+        if self.session and self.session.shop_slots:
+            self._shop_slots(self.session.shop_slots)
+            self._render_proposal()
 
     def accept_outfit(self):
         s = self.session

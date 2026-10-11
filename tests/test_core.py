@@ -759,3 +759,33 @@ def test_outfit_changes_in_conversation(lib, tmp_path):
         assert [r["entry_id"] for r in outfit["removed"]] == [jacket]
     for key in ("accept_remove", "decline_modest", "propose_remove_regret", "removal_refused"):
         assert TEMPLATES[key]["any"]
+
+
+def test_shop_offers_and_buys_missing_pieces(lib, tmp_path):
+    import random
+    from ultimate_outfitter.core.outfit import buy, shop_offer
+    ch = _wardrobe_char(lib, tmp_path, ["Underwear Bottoms", "Bras", "Shirts", "Pants"])
+    # shoes exist in the library but the character owns none
+    ans = _first_answers("Shoes")
+    t, a = categories.evaluate_answers("Shoes", ans)
+    shoe = lib.add_item(_garment(tmp_path / "shoe.png"), "Runner", "Shoes", ans, t, a)
+    for name, col in (("Teal", "#108080"), ("Sun", "#F0C020"), ("Ink", "#202040")):
+        lib.add_palette(name, [col])
+    s = OutfitSession(ch, DayContext("Casual / errands", "Calm", "Warm"))
+    s.build()
+    assert "footwear" in s.shop_slots
+    rng = random.Random(4)
+    offers = [shop_offer(s, "footwear", rng) for _ in range(6)]
+    assert all(o and o["item"]["id"] == shoe["id"] for o in offers)
+    assert len({tuple(p["id"] for p in o["palettes"]) for o in offers}) > 1   # pressing Shop again re-rolls
+    n_before = len(ch.data["wardrobe"])
+    processed = list(ch.data["processed_items"])
+    entry = buy(ch, offers[0])
+    assert entry and entry["slot"] == "footwear" and entry["id"] in ch.data["dresser"] and entry.get("bought")
+    assert len(ch.data["wardrobe"]) == n_before + 1
+    assert ch.data["processed_items"] == processed      # buying doesn't mark library items as scanned
+    s.proposal.setdefault("footwear", []).append(entry["id"])
+    assert s.slot_of(entry["id"]) == "footwear"
+    # clashing palettes rejected for the slot are not offered
+    s.slot_avoid_palettes["footwear"] = {p["id"] for p in list(lib.palettes.values())[:-1]}
+    assert all(p["id"] not in s.slot_avoid_palettes["footwear"] for p in shop_offer(s, "footwear", rng)["palettes"])

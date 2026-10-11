@@ -160,6 +160,14 @@ Profiles are saved automatically and reopen with the app. *Open profile file…*
 * If the character simply doesn't own something (e.g. no tops, shoes or swimwear), laundry wouldn't help. The app
   then does its best with what exists, even if that's only underwear, and lists the missing parts above the outfit.
   Complete outfits are always preferred when possible.
+* **Shop:** when you reject a piece and nothing else in the dresser fits, you can choose **Shop** as well as laundry
+  or leaving the slot empty. The shop also appears when the wardrobe has nothing for an essential piece: there is a
+  *Shop for missing pieces…* button above the outfit, and a *Shop* choice when no outfit can be made. The shop
+  suggests a random piece that suits the day, with a preview. It is any clothing item for that slot from your
+  collection, in random palettes from your library, sometimes with a print. It ignores the character's personality
+  and wardrobe rules, but palettes you rejected as clashing for that slot are avoided. Press **Shop** again for
+  another random piece, or **Buy** to create it: it is saved like any wardrobe piece, added to the dresser and
+  worn in the current outfit (waiting for your approval).
 * **Edit this outfit…** (on the *Current outfit & history* page) changes the shown outfit, current or past:
   *Add piece…*, *Replace…* (offers the same kind of piece first) and *Remove*. Added pieces must be clean, so they
   come from the dresser and go to the hamper. Removed pieces stay in the hamper: editing never puts anything back

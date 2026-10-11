@@ -108,11 +108,13 @@ class DayContext:
 
 
 class NoOutfitPossible(Exception):
+    """``missing`` are readable names; ``shop_slots`` the slots the character owns nothing for."""
     """Raised when required pieces are all in the hamper (laundry needed)."""
 
-    def __init__(self, missing: list[str], laundry_helps: bool):
+    def __init__(self, missing: list[str], laundry_helps: bool, shop_slots: list[str] | None = None):
         self.missing = missing
         self.laundry_helps = laundry_helps
+        self.shop_slots = shop_slots or []
         super().__init__(", ".join(missing))
 
 
@@ -129,6 +131,7 @@ class OutfitSession:
     slot_excluded_categories: dict[str, set[str]] = field(default_factory=dict)
     slot_weights: dict[str, dict[str, float]] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    shop_slots: list[str] = field(default_factory=list)   # essential slots the wardrobe has nothing for
     seed: int = field(default_factory=lambda: random.randrange(1 << 30))
 
     # ------------------------------------------------------------------ data
@@ -313,8 +316,12 @@ class OutfitSession:
         def available(slot):
             return any(self.slot_accepts(slot, e["slot"]) for e in self.dresser_entries())
 
+        self.shop_slots = []
+
         def note_missing(slot):
             (in_hamper if slot in owned else not_owned).append(SLOTS[slot])
+            if slot not in owned:
+                self.shop_slots.append(slot)
 
         # core garments: prefer a complete alternative with the best average top score;
         # otherwise fall back to the alternative that can be filled the most
@@ -332,6 +339,9 @@ class OutfitSession:
             fixable = any(all(s in owned for s in g) for g in core_groups)
             label = " / ".join("+".join(SLOTS[s] for s in g) for g in core_groups)
             (in_hamper if fixable else not_owned).append(label)
+            if not fixable:   # shop for the alternative that needs the fewest new pieces
+                group = min(core_groups, key=lambda g: sum(s not in owned for s in g))
+                self.shop_slots += [s for s in group if s not in owned]
         elif best_group:
             for slot in best_group:
                 if not self._fill_slot(slot):
@@ -343,10 +353,10 @@ class OutfitSession:
             if not self._fill_slot(slot):
                 note_missing(slot)
         if in_hamper and not allow_incomplete:
-            raise NoOutfitPossible(in_hamper + not_owned, True)
+            raise NoOutfitPossible(in_hamper + not_owned, True, self.shop_slots)
         missing = in_hamper + not_owned
-        if missing:
-            self.warnings.append("Incomplete outfit - nothing suitable for: " + ", ".join(missing) + ".")
+        self._missing = (in_hamper, not_owned)
+        self._update_warnings()
 
         acc_level = self.character.data.get("prefs", {}).get("accessory_level", 3)
         self._fill_optional(optional, acc_level, relaxed=False)
@@ -354,8 +364,28 @@ class OutfitSession:
             # nothing essential could be found: take the best of whatever optional pieces exist
             self._fill_optional(optional, acc_level, relaxed=True)
         if not self.proposal:
-            raise NoOutfitPossible(missing or ["everything"], bool(in_hamper))
+            raise NoOutfitPossible(missing or ["everything"], bool(in_hamper), self.shop_slots)
         return self.proposal
+
+    def _update_warnings(self) -> None:
+        in_hamper, not_owned = getattr(self, "_missing", ([], []))
+        missing = in_hamper + not_owned
+        self.warnings = [w for w in self.warnings if not w.startswith("Incomplete outfit")]
+        if missing:
+            self.warnings.append("Incomplete outfit - nothing suitable for: " + ", ".join(missing) + ".")
+
+    def add_bought(self, slot: str, entry_id: str) -> None:
+        """Wear a piece just bought in the shop for ``slot``."""
+        self.proposal.setdefault(slot, []).append(entry_id)
+        self.skipped_slots.discard(slot)
+        if slot in self.shop_slots:
+            self.shop_slots.remove(slot)
+        in_hamper, not_owned = getattr(self, "_missing", ([], []))
+        not_owned = [m for m in not_owned if m != SLOTS.get(slot)]
+        if not self.shop_slots:
+            not_owned = []
+        self._missing = (in_hamper, not_owned)
+        self._update_warnings()
 
     def _fill_optional(self, optional: list[str], acc_level: int, relaxed: bool) -> None:
         accessories_added = sum(len(ids) for sl, ids in self.proposal.items() if sl in ACCESSORY_SLOTS)
@@ -489,6 +519,66 @@ class OutfitSession:
         path = unique_path(folder / f"Outfit-{time.strftime('%Y-%m-%d')}.png")
         sheet.save(path)
         return path.relative_to(self.character.dir).as_posix()
+
+
+# ---------------------------------------------------------------------------
+# Shop: random new pieces for a slot the wardrobe can't fill
+# ---------------------------------------------------------------------------
+
+def shop_offer(session: "OutfitSession", slot: str, rng: random.Random | None = None) -> dict | None:
+    """A random new piece for ``slot`` that suits the day (not the character's wardrobe rules).
+
+    Returns a build-plan piece {"item", "palettes", "pattern", "score", "slot"} for
+    :meth:`Character.build_wardrobe`, or None if the library has no item for the slot.
+    Any library palette may be used (except ones rejected for clashing in this slot), and
+    sometimes a fitting pattern.
+    """
+    from .patterns import pattern_fits
+    rng = rng or random.Random()
+    lib = session.character.library
+    avoid = session.slot_avoid_palettes.get(slot, set())
+    bad_cats = session.slot_excluded_categories.get(slot, set())
+    items = []
+    for item in lib.items.values():
+        cat = CATEGORY_BY_NAME.get(item["category"])
+        if not cat or not session.slot_accepts(slot, cat.slot):
+            continue
+        if item["id"] in session.excluded_items or item["category"] in bad_cats:
+            continue
+        items.append((item, cat))
+    if not items:   # rejected everything - ignore the rejections rather than offer nothing
+        items = [(i, CATEGORY_BY_NAME[i["category"]]) for i in lib.items.values()
+                 if i["category"] in CATEGORY_BY_NAME and session.slot_accepts(slot, CATEGORY_BY_NAME[i["category"]].slot)]
+    palettes = [p for p in lib.palettes.values() if p["id"] not in avoid] or list(lib.palettes.values())
+    if not items or not palettes:
+        return None
+    # how well each item suits the day: activity, warmth, formality (no personality involved)
+    scored = []
+    for item, cat in items:
+        fake = {"id": f"shop-{item['id']}", "item_id": item["id"], "category": item["category"],
+                "palettes": [], "slot": cat.slot, "rating": 50}
+        scored.append((session.score(fake, slot), item, cat))
+    best = max(sc for sc, _, _ in scored)
+    suitable = [(item, cat) for sc, item, cat in scored if sc >= best - 20]
+    item, cat = rng.choice(suitable)
+    n = 1 + (rng.random() < 0.3) + (rng.random() < 0.08)
+    combo = rng.sample(palettes, min(n, len(palettes)))
+    pattern = None
+    fitting = [p for p in lib.patterns.values() if pattern_fits(p, item)]
+    if fitting and rng.random() < 0.3:
+        pattern = rng.choice(fitting)
+    return {"item": item, "palettes": combo, "pattern": pattern, "score": 50, "slot": slot}
+
+
+def buy(character: Character, offer: dict) -> dict | None:
+    """Create the offered piece and put it in the dresser. Returns the new wardrobe entry."""
+    created = character.build_wardrobe(item_ids=[], plan=[offer])
+    if not created:
+        return None
+    entry = created[0]
+    entry["bought"] = time.strftime("%Y-%m-%d %H:%M")
+    character.save()
+    return entry
 
 
 def outfit_piece(entry: dict) -> dict:
