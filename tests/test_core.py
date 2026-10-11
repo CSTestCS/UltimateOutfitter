@@ -693,9 +693,11 @@ def test_preview_settings_and_wet_rules(lib, tmp_path):
     text = path.read_text(encoding="utf-8")
     text = text.replace("wet darkening = 0.25", "wet darkening = 5").replace("physics = 1", "physics = off")
     text = text.replace("Happy = happy:1.0", "Happy = happy:0.4, Fcl_ALL_Joy:0.5")
+    text = text.replace("wet shine = full", "wet shine = Very Low").replace("silk shine = full", "silk shine = 0.4")
     path.write_text(text, encoding="utf-8")
     data = preview_settings.load(lib)
     assert data["numbers"]["wet darkening"] == 0.9 and data["numbers"]["physics"] == 0
+    assert data["numbers"]["wet shine"] == 0.15 and data["numbers"]["silk shine"] == 0.4
     # new characters' expressions.txt start from the library defaults
     ch = _wardrobe_char(lib, tmp_path, ["Shirts", "Pants"], build=False)
     assert expressions.load(ch)["happy"] == {"happy": 0.4, "Fcl_ALL_Joy": 0.5}

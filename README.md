@@ -233,21 +233,21 @@ modified.
 * **Physics:** the model's spring bones (hair, skirts, ribbons...) swing with every movement. A gentle idle sway
   keeps them alive when no animation is playing, they blow in the wind when it's **Windy** (a little in rain and
   cold), and wet hair hangs heavier.
-* **Shine level** (next to *Wet look*): off, faint, very low, low, medium, high, full or extra. It scales every
-  metallic, silk and wet shine for the character. Weak metal looks mostly matte with a soft sheen; full is
-  polished metal.
 * **Preview settings…** opens `preview_settings.txt` in the library folder. It is shared by all characters:
 
   | Setting | Default | Meaning |
   |---|---|---|
   | `wet thin opacity` | 0.7 | opacity of thin clothing while wet (1 = not see-through) |
-  | `metallic shine` | 1.0 | strength of metallic reflections (0 = off) |
-  | `silk shine` | 1.0 | strength of the silk sheen (0 = off) |
-  | `wet shine` | 1.0 | strength of the wet gloss (0 = off) |
+  | `metallic shine` | full | metallic reflections - weak levels look mostly matte, full is polished metal |
+  | `silk shine` | full | the silk / satin sheen |
+  | `wet shine` | full | the wet gloss on the whole character |
   | `wet darkening` | 0.25 | how much darker clothing, hair and accessories get while wet |
   | `physics` | 1 | spring-bone physics on (1) or off (0) |
   | `physics stiffness` | 1.0 | multiplies the model's spring stiffness |
   | `wind strength` | 1.0 | how strongly wind moves hair and clothing |
+
+  The three shine settings take a level: `off`, `faint`, `very low`, `low`, `medium`, `high`, `full`, `extra` or
+  `maximum` (or a number, 1 = full), e.g. `wet shine = low`. They apply to every character.
 
   Its `[default expressions]` section holds the mood and reaction faces. Every new character's `expressions.txt`
   starts from them, and any mood missing from a character's file uses them.

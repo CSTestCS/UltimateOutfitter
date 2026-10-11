@@ -17,12 +17,18 @@ from pathlib import Path
 
 FILE_NAME = "preview_settings.txt"
 
+# named shine levels (a number works too: 0 = off, 1 = full)
+SHINE_LEVELS = {"off": 0.0, "faint": 0.08, "very low": 0.15, "low": 0.3, "medium": 0.5,
+                "high": 0.75, "full": 1.0, "extra": 1.5, "maximum": 3.0}
+SHINE_KEYS = ("metallic shine", "silk shine", "wet shine")
+LEVEL_HELP = "off, faint, very low, low, medium, high, full, extra, maximum - or a number (1 = full)"
+
 # key: (default, minimum, maximum, comment)
 NUMBERS = {
     "wet thin opacity": (0.7, 0.0, 1.0, "opacity of thin clothing while wet (1 = not see-through)"),
-    "metallic shine": (1.0, 0.0, 3.0, "strength of metallic reflections (0 = off, 0.1 = barely, 1 = polished)"),
-    "silk shine": (1.0, 0.0, 3.0, "strength of the silk sheen (0 = off)"),
-    "wet shine": (1.0, 0.0, 3.0, "strength of the wet gloss on the whole character (0 = off)"),
+    "metallic shine": (1.0, 0.0, 3.0, "metallic reflections: weak levels look mostly matte, full is polished metal"),
+    "silk shine": (1.0, 0.0, 3.0, "the silk / satin sheen"),
+    "wet shine": (1.0, 0.0, 3.0, "the wet gloss on the whole character (rain, swimming, heat)"),
     "wet darkening": (0.25, 0.0, 0.9, "how much darker clothing, hair and accessories get while wet "
                                       "(0 = not at all; thin, metallic and silk pieces never darken)"),
     "physics": (1.0, 0.0, 1.0, "1 = hair / clothing physics (spring bones) on, 0 = off"),
@@ -51,11 +57,19 @@ def default_text() -> str:
     from .expressions import DEFAULTS
     lines = [HEADER]
     for key, (value, lo, hi, comment) in NUMBERS.items():
+        if key in SHINE_KEYS:
+            lines.append(f"# {comment}\n#   {LEVEL_HELP}")
+            lines.append(f"{key} = {level_name(value)}")
+            continue
         lines.append(f"# {comment} ({lo:g} - {hi:g})")
         lines.append(f"{key} = {value:g}")
     lines.append(EXPR_HEADER)
     lines += [f"{k} = {v}" for k, v in DEFAULTS.items()]
     return "\n".join(lines) + "\n"
+
+
+def level_name(value: float) -> str:
+    return next((k for k, v in SHINE_LEVELS.items() if abs(v - value) < 1e-9), f"{value:g}")
 
 
 def ensure(library) -> Path:
@@ -89,7 +103,10 @@ def parse(text: str) -> dict:
         low = " ".join(key.lower().replace("_", " ").split())
         if low in NUMBERS:
             _, lo, hi, _ = NUMBERS[low]
-            if value.lower() in ("on", "yes", "true"):
+            named = " ".join(value.lower().replace("_", " ").replace("-", " ").split())
+            if low in SHINE_KEYS and named in SHINE_LEVELS:
+                value = str(SHINE_LEVELS[named])
+            elif value.lower() in ("on", "yes", "true"):
                 value = "1"
             elif value.lower() in ("off", "no", "false"):
                 value = "0"

@@ -37,11 +37,6 @@ TIMES = [("Automatic (clock)", "auto"), ("Dawn", "dawn"), ("Morning", "morning")
          ("Evening", "evening"), ("Night", "night")]
 
 
-# overall shine strength choices (multiply preview_settings.txt's metallic / silk / wet shine)
-SHINE_LEVELS = [("off", 0.0), ("faint", 0.08), ("very low", 0.15), ("low", 0.3), ("medium", 0.5),
-                ("high", 0.75), ("full", 1.0), ("extra", 1.5)]
-
-
 class InteractTab(QWidget):
     def __init__(self, state: AppState):
         super().__init__()
@@ -141,15 +136,8 @@ class InteractTab(QWidget):
         self.wet_mode.addItem("Wet look: never", "off")
         self.wet_mode.currentIndexChanged.connect(lambda *_: self._apply_wet())
         self.wet_mode.setToolTip("Automatic: wet when swimming, in the rain or sweating in scorching heat")
-        self.shine_combo = QComboBox()
-        for label, v in SHINE_LEVELS:
-            self.shine_combo.addItem(f"Shine: {label}", v)
-        self.shine_combo.setCurrentIndex(self.shine_combo.findData(1.0))
-        self.shine_combo.setToolTip("Overall strength of metallic, silk and wet shine in the preview "
-                                    "(multiplies the values in preview_settings.txt)")
-        self.shine_combo.currentIndexChanged.connect(self._shine_level_chosen)
         b_prev = QPushButton("Preview settings…")
-        b_prev.setToolTip("Edit preview_settings.txt: wet see-through, shine strengths, wet darkening, physics and "
+        b_prev.setToolTip("Edit preview_settings.txt: wet see-through, metallic / silk / wet shine levels, wet darkening, physics and "
                           "the default facial expressions for new characters")
         b_prev.clicked.connect(self.edit_preview_settings)
         b_mats = QPushButton("Edit materials…")
@@ -159,7 +147,7 @@ class InteractTab(QWidget):
         b_mat_list = QPushButton("List model materials")
         b_mat_list.clicked.connect(lambda: self.viewport.call("listMaterials", report="materials"))
         view_bar4 = QHBoxLayout()
-        for w in (self.wet_mode, self.shine_combo, b_prev, b_mats, b_mat_list):
+        for w in (self.wet_mode, b_prev, b_mats, b_mat_list):
             view_bar4.addWidget(w)
         view_bar4.addStretch(1)
         left = QVBoxLayout()
@@ -342,11 +330,6 @@ class InteractTab(QWidget):
         self.time_combo.blockSignals(True)
         self.time_combo.setCurrentIndex(max(0, self.time_combo.findData(vs.get("time", "auto"))))
         self.time_combo.blockSignals(False)
-        self.shine_combo.blockSignals(True)
-        level = vs.get("shine_level", 1.0)
-        self.shine_combo.setCurrentIndex(min(range(self.shine_combo.count()),
-                                             key=lambda i: abs(self.shine_combo.itemData(i) - level)))
-        self.shine_combo.blockSignals(False)
         self.bg_combo.setCurrentIndex(max(0, self.bg_combo.findData(vs.get("background", {}).get("mode", "sky"))))
         self._fill_days()
         self._fill_worn()
@@ -500,14 +483,7 @@ class InteractTab(QWidget):
     def _settings_payload(self) -> dict:
         n = self.preview["numbers"]
         return {"metallic": n["metallic shine"], "silk": n["silk shine"], "wetShine": n["wet shine"],
-                "darken": n["wet darkening"], "level": self.shine_combo.currentData()}
-
-    def _shine_level_chosen(self, *_):
-        if self.character:
-            self.character.data.setdefault("viewer", {})["shine_level"] = self.shine_combo.currentData()
-            self.character.save()
-        if self.loaded_vrm:
-            self.viewport.call("setPreviewSettings", self._settings_payload())
+                "darken": n["wet darkening"]}
 
     def _apply_physics(self, wetness: float = 0.0):
         if not self.conv or not self.loaded_vrm:
