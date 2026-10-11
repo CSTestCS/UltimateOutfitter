@@ -283,8 +283,12 @@ class WardrobeTab(QWidget):
         b_clear = QPushButton("Clear wardrobe…")
         b_clear.setToolTip("Delete every generated piece so the wardrobe can be rebuilt from scratch")
         b_clear.clicked.connect(self.clear_wardrobe)
+        b_manual = QPushButton("Add a specific piece…")
+        b_manual.setToolTip("Choose an item, its palettes, print and options yourself, preview it and add it")
+        b_manual.clicked.connect(self.add_manual_piece)
         gl.addWidget(b_build)
         gl.addWidget(self.b_new)
+        gl.addWidget(b_manual)
         gl.addWidget(b_clear)
         self.ratings = QTreeWidget()
         self.ratings.setHeaderLabels(["Category / item", "Match"])
@@ -308,6 +312,9 @@ class WardrobeTab(QWidget):
         gb = QHBoxLayout()
         gb.addWidget(self.filter)
         gb.addWidget(self.count_label, 1)
+        b_manual2 = QPushButton("Add a specific piece…")
+        b_manual2.clicked.connect(self.add_manual_piece)
+        gb.addWidget(b_manual2)
         gb.addWidget(b_ed)
         gb.addWidget(b_del)
         gal = QWidget()
@@ -534,6 +541,21 @@ class WardrobeTab(QWidget):
                                    for i in range(self.patterns_list.count())
                                    if self.patterns_list.item(i).checkState() != Qt.CheckState.Checked]
         ch.save()
+
+    def add_manual_piece(self):
+        from .manual_piece import ManualPieceDialog
+        ch = self.character
+        if not ch:
+            QMessageBox.information(self, "Wardrobe", "Create or choose a character first.")
+            return
+        if not self.state.library.items or not self.state.library.palettes:
+            QMessageBox.information(self, "Wardrobe", "Add clothing items and palettes in A. Collection first.")
+            return
+        dlg = ManualPieceDialog(self, ch)
+        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.entry:
+            self.refresh_gallery()
+            self.tabs.setCurrentIndex(1)
+            self.state.characters_changed.emit()
 
     def _pct(self, tip: str) -> QSpinBox:
         sp = QSpinBox()

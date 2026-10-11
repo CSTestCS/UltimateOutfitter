@@ -816,3 +816,27 @@ def test_rejecting_every_dress_switches_to_top_and_bottoms(lib, tmp_path):
     entry = buy(ch, offer)
     s.add_bought("base_top", entry["id"])
     assert s.proposal["full_body"] == [entry["id"]] and not s.proposal.get("legs") and not s.proposal.get("base_top")
+
+
+def test_manual_piece_options(lib, tmp_path):
+    a = lib.add_palette("Red", ["#B01010"])
+    b = lib.add_palette("Silk Blue", ["#1030C0"])
+    arr = np.zeros((40, 40, 4), np.uint8)
+    arr[4:36, 4:36] = (150, 150, 150, 255)
+    Image.fromarray(arr, "RGBA").save(tmp_path / "plain.png")
+    ans = _first_answers("Hats")
+    t, at = categories.evaluate_answers("Hats", ans)
+    hat = lib.add_item(tmp_path / "plain.png", "Plain Hat", "Hats", ans, t, at)
+    ch = _wardrobe_char(lib, tmp_path, [], build=False)
+    info: dict = {}
+    out = np.array(ch.render_piece(hat, [a, b], None, {}, info_out=info, auto_pattern=False)[0])
+    assert not info.get("pattern") and (0x10, 0x30, 0xC0) not in {tuple(px) for px in out[out[..., 3] > 0][:, :3]}
+    shine: list = []
+    ch.render_piece(hat, [a, b], None, {}, shine_out=shine, shine="none")
+    assert shine == [[]]
+    shine = []
+    ch.render_piece(hat, [a, b], None, {}, shine_out=shine, shine=("metallic", 0))
+    assert shine[0] and shine[0][0][1] == "metallic"
+    entry, = ch.build_wardrobe(item_ids=[], plan=[{"item": hat, "palettes": [a], "pattern": None, "score": 70,
+                                                   "shine": ("metallic", 0), "custom": True, "lock": True}])
+    assert entry["custom"] and entry["shine"] == ["metallic"] and entry["id"] in ch.data["dresser"]

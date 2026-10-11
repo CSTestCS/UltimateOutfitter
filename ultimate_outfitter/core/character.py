@@ -556,7 +556,8 @@ class Character:
 
     def render_piece(self, item: dict, palettes: list[dict], pattern: dict | None,
                      cache: dict | None = None, shine_out: list | None = None,
-                     info_out: dict | None = None, lock: bool | None = None) -> list[np.ndarray]:
+                     info_out: dict | None = None, lock: bool | None = None,
+                     auto_pattern: bool = True, shine: str | tuple | None = None) -> list[np.ndarray]:
         """Recolour (and optionally print) every image of an item the same way.
 
         * ``lock`` (default: the character's "lock_palette" setting, on by default) restricts
@@ -569,6 +570,8 @@ class Character:
           preview renders the shine. If no palette asks for it but the item's own name does,
           the item's main palette is used.
         ``info_out`` receives {"pattern": dict or None} for an automatically added pattern.
+        ``auto_pattern=False`` never adds that pattern. ``shine`` overrides the name rules:
+        "none", or (kind, palette index) such as ("metallic", 0).
         """
         cache = cache if cache is not None else {}
         if lock is None:
@@ -612,8 +615,8 @@ class Character:
                           lambda i: masks[i] if whole or not primaries[i].any() else primaries[i] & masks[i],
                           whole, pattern.get("attrs", {}).get("repeats", 6), g)
         # palettes that coloured nothing (image has too few colours) get a pattern instead
-        auto_pattern = None
-        if pal_masks:
+        allow_auto, auto_pattern = auto_pattern, None
+        if pal_masks and allow_auto:
             for g in range(1, len(palettes)):
                 if any(pm[g].any() for pm in pal_masks):
                     continue
@@ -637,6 +640,10 @@ class Character:
         shiny = [(g, shine_kind(p["name"])) for g, p in enumerate(palettes) if shine_kind(p["name"])]
         if not shiny and shine_kind(item["name"]):
             shiny = [(0, shine_kind(item["name"]))]
+        if shine == "none":
+            shiny = []
+        elif isinstance(shine, (tuple, list)):
+            shiny = [(min(int(shine[1]), len(palettes) - 1), shine[0])]
         for i in range(len(outs)):
             applied = []
             for g, kind in shiny:
@@ -672,7 +679,9 @@ class Character:
             shine: list = []
             try:
                 info: dict = {}
-                outs = self.render_piece(item, combo, pattern, cache, shine_out=shine, info_out=info)
+                outs = self.render_piece(item, combo, pattern, cache, shine_out=shine, info_out=info,
+                                         lock=piece.get("lock"), auto_pattern=piece.get("auto_pattern", True),
+                                         shine=piece.get("shine"))
             except OSError:
                 continue
             if pattern is None and info.get("pattern"):
@@ -707,6 +716,7 @@ class Character:
                 "pattern_name": pattern["name"] if pattern else None,
                 "file": files[0], "files": files, "rating": score, "created": time.time(),
                 "shine": shine_kinds, "shine_masks": shine_files,
+                **({"custom": True} if piece.get("custom") else {}),
             }
             self.data["wardrobe"][entry["id"]] = entry
             self.data["dresser"].append(entry["id"])

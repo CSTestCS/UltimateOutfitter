@@ -129,6 +129,12 @@ The app never overwrites files it creates automatically. If a name is taken, it 
    main colour, and the lighter and darker shades are used for highlights, shading and details.
 
    Files are saved as `Characters/<Name>/Wardrobe/<Name>-<Item>-<Palette>.png` and added to the dresser.
+   **Add a specific piece…** (under the build buttons and on the *Wardrobe* page) makes one piece by hand. You
+   choose the item, up to three palettes, an optional print (placement and number of repeats), the 3D preview shine
+   (automatic from names, none, or metallic / silk on a chosen palette), whether colours are locked to the exact
+   palette, and whether a print may be added for an unused palette. A live preview shows the result. The piece is
+   saved and named like generated ones and goes into the dresser.
+
 4. **Scan for new clothing items** processes only the items added since the last build. Each suitable new
    item gets one version, and great matches sometimes get two. *Build / update* skips
    any item and palette combination that already exists.
@@ -160,12 +166,16 @@ Profiles are saved automatically and reopen with the app. *Open profile file…*
 * If the character simply doesn't own something (e.g. no tops, shoes or swimwear), laundry wouldn't help. The app
   then does its best with what exists, even if that's only underwear, and lists the missing parts above the outfit.
   Complete outfits are always preferred when possible.
+* **Dress or top + bottoms:** if you reject every dress, the outfit switches to a top and bottoms (and the other
+  way round), and tights / legwear are considered with the new combination. The same goes for sleepwear and
+  swimwear alternatives.
 * **Shop:** when you reject a piece and nothing else in the dresser fits, you can choose **Shop** as well as laundry
   or leaving the slot empty. The shop also appears when the wardrobe has nothing for an essential piece: there is a
   *Shop for missing pieces…* button above the outfit, and a *Shop* choice when no outfit can be made. The shop
   suggests a random piece that suits the day, with a preview. It is any clothing item for that slot from your
   collection, in random palettes from your library, sometimes with a print. It ignores the character's personality
-  and wardrobe rules, but palettes you rejected as clashing for that slot are avoided. Press **Shop** again for
+  and wardrobe rules, but palettes you rejected as clashing for that slot are avoided. Shopping for a dress may
+  also offer tops or bottoms, and vice versa; buying one switches the outfit to that combination. Press **Shop** again for
   another random piece, or **Buy** to create it: it is saved like any wardrobe piece, added to the dresser and
   worn in the current outfit (waiting for your approval).
 * **Edit this outfit…** (on the *Current outfit & history* page) changes the shown outfit, current or past:
@@ -223,6 +233,9 @@ modified.
 * **Physics:** the model's spring bones (hair, skirts, ribbons...) swing with every movement. A gentle idle sway
   keeps them alive when no animation is playing, they blow in the wind when it's **Windy** (a little in rain and
   cold), and wet hair hangs heavier.
+* **Shine level** (next to *Wet look*): off, faint, very low, low, medium, high, full or extra. It scales every
+  metallic, silk and wet shine for the character. Weak metal looks mostly matte with a soft sheen; full is
+  polished metal.
 * **Preview settings…** opens `preview_settings.txt` in the library folder. It is shared by all characters:
 
   | Setting | Default | Meaning |
