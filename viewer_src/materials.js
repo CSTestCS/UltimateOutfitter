@@ -99,6 +99,8 @@ function overrideFor(name) {
 }
 
 function matchFor(e) {
+  // skin, face, eyes and hair are never wardrobe pieces, whatever their texture looks like
+  if (SKIN.test(e.name) || /hair/i.test(e.name)) return null;
   return matches.find((m) => m.material === e.name) || null;
 }
 
@@ -154,9 +156,9 @@ function glossMaterial(src) {
     transparent: true,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
-    polygonOffset: true,
-    polygonOffsetFactor: -1,
-    polygonOffsetUnits: -1,
+    // drawn on exactly the same surface: equal depth passes, so the layer never pokes through
+    // clothing that lies close above it (e.g. underwear on skin)
+    depthFunc: THREE.LessEqualDepth,
     side: src ? src.side : THREE.FrontSide,
   });
   m.userData.isGloss = true;
@@ -344,7 +346,7 @@ function maskedEffectMaterial(e, kind, mask) {
     return new THREE.MeshStandardMaterial({
       map: src.map || null, color: src.color ? src.color.clone() : new THREE.Color(1, 1, 1),
       metalness: 1.0, roughness: 0.22, alphaMap: mask, transparent: true, depthWrite: false,
-      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1, side: src.side,
+      depthFunc: THREE.LessEqualDepth, side: src.side,
       envMapIntensity: envIntensity * 1.2 * boost(metalS()),
     });
   }

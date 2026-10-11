@@ -586,7 +586,9 @@ def test_vrm_textures_match_wardrobe_pieces(lib, tmp_path):
     tex = Image.open(ch.dir / bra_entry["file"]).resize((256, 256), Image.BILINEAR)
     other = Image.new("RGBA", (128, 128), (230, 190, 170, 255))  # skin, not from the wardrobe
     vrm = tmp_path / "model.vrm"
-    _write_glb(vrm, [("N00_010_01_Onepiece_00_CLOTH", tex), ("N00_000_00_Body_00_SKIN", other)])
+    # skin / face textures are never wardrobe pieces, even when they look exactly like one
+    _write_glb(vrm, [("N00_010_01_Onepiece_00_CLOTH", tex), ("N00_000_00_Body_00_SKIN", other),
+                     ("N00_000_00_Face_00_SKIN (Instance)", tex), ("N00_000_Hair_00_HAIR", tex)])
     found = vrm_match.match_wardrobe(ch, vrm)
     assert [m["material"] for m in found] == ["N00_010_01_Onepiece_00_CLOTH"]
     m = found[0]

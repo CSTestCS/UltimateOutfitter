@@ -218,7 +218,9 @@ modified.
   *Metallic…* palette is drawn as reflective metal, but only where its shine mask is: in
   `Hat-MetallicGreen+Purple` just the MetallicGreen parts reflect. *Silk…* palettes get a soft sheen the same way.
   A piece whose clothing item is marked **thin** becomes see-through while wet. Older pieces made before shine masks
-  existed get theirs generated automatically. The status line under the viewport lists what was matched.
+  existed get theirs generated automatically. The status line under the viewport lists what was matched. Skin,
+  face, eye and hair materials are never matched (their textures can look like a garment drawn on the same body
+  layout).
 * **Fallback:** model parts that don't match the wardrobe still count as **metallic** when their material or
   texture name says so (metallic, metal, chrome, silver, gold, steel, armor). VRoid's matcap textures are no
   longer treated as metal, since VRoid puts them on many parts that are not metal.

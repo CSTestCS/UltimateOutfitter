@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import struct
 from pathlib import Path
 
@@ -18,6 +19,9 @@ import numpy as np
 from PIL import Image
 
 SIG_SIZE = 48
+# model parts that are never clothing: their textures can look like a garment drawn on the same body
+# UV layout (VRoid names them ..._SKIN, ..._FACE, ..._EYE, ..._HAIR), so they are never matched
+NOT_CLOTHING = re.compile(r"skin|face|eye|mouth|brow|lash|teeth|tongue|iris|hair", re.I)
 MATCH_THRESHOLD = 14.0     # mean colour difference (0-255) allowed for a match
 
 
@@ -136,6 +140,10 @@ def file_signature(path: Path) -> np.ndarray | None:
     return sig
 
 
+def is_clothing_material(name: str) -> bool:
+    return not NOT_CLOTHING.search(name or "")
+
+
 def match_wardrobe(character, vrm_path: Path | str, threshold: float = MATCH_THRESHOLD) -> list[dict]:
     """Find wardrobe pieces whose images are used as textures in the VRM.
 
@@ -143,7 +151,7 @@ def match_wardrobe(character, vrm_path: Path | str, threshold: float = MATCH_THR
     {material, entry_id, item_name, file, file_index, difference, shine: [{kind, mask}], thin}
     where ``mask`` is a path (relative to the character folder) to the piece's shine mask.
     """
-    mats = material_textures(vrm_path)
+    mats = [m for m in material_textures(vrm_path) if is_clothing_material(m["material"])]
     if not mats:
         return []
     wardrobe = character.data.get("wardrobe", {})
