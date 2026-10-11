@@ -337,7 +337,7 @@ def _assign_targets(region_ids: list[int], centers: np.ndarray, share: np.ndarra
 def recolor_regions_multi(imgs: Sequence[np.ndarray], masks: Sequence[np.ndarray],
                           palettes: Sequence[Sequence[str]], kinds: Sequence[str] | None = None,
                           regions: int | None = None, strength: float = 1.0,
-                          palette_masks_out: list | None = None
+                          palette_masks_out: list | None = None, lock: bool = False
                           ) -> tuple[list[np.ndarray], list[np.ndarray]]:
     """Recolour one clothing item (one or more images) with one or more palettes.
 
@@ -350,6 +350,10 @@ def recolor_regions_multi(imgs: Sequence[np.ndarray], masks: Sequence[np.ndarray
 
     Returns (recoloured images, primary masks) - the primary mask marks the largest
     region of the first palette in each image (used for prints / patterns).
+    With ``lock`` every pixel gets an exact palette colour (no in-between colours): a region
+    of a "varied" palette takes exactly its assigned colour; for a "shades" palette all
+    pixels coloured with it are ranked by lightness - the brightest take the brightest shade,
+    the darkest the darkest shade, everything between the proportionally matching shade.
     If ``palette_masks_out`` is a list, it receives one entry per image: a list with one
     boolean mask per palette marking exactly the pixels that palette coloured.
     """
@@ -374,10 +378,47 @@ def recolor_regions_multi(imgs: Sequence[np.ndarray], masks: Sequence[np.ndarray
             for r, ci in _assign_targets(region_ids, centers, share, pals[g], kinds[g]).items():
                 targets[r] = (g, ci)
     primary_region = max(groups[0], key=lambda r: share[r]) if groups[0] else int(order[0])
+    pal_rgb = [np.array(sorted((hex_to_rgb(c) for c in p), key=lambda rgb: rgb_to_lab(np.array(rgb, float))[0]),
+                        dtype=np.uint8) for p in palettes]
+    lab_cache = [rgb_to_lab(im[..., :3][m].astype(float)) if m.any() else np.zeros((0, 3))
+                 for im, m in zip(imgs, masks)]
+    group_range: dict[int, tuple[float, float]] = {}
+    if lock:
+        # lightness range of everything each palette colours, across all images of the item
+        for g in range(len(palettes)):
+            region_ids = [r for r, (gg, _) in targets.items() if gg == g]
+            Ls = [lab[:, 0][np.isin(lbl[m], region_ids)] for lab, lbl, m in zip(lab_cache, labels, masks) if m.any()]
+            Ls = np.concatenate(Ls) if Ls else np.zeros(0)
+            if len(Ls):
+                group_range[g] = (float(np.percentile(Ls, 1)), float(np.percentile(Ls, 99)))
     for n, (img, mask, lbl, out, prim) in enumerate(zip(imgs, masks, labels, outs, primaries)):
         if not mask.any():
             continue
         prim |= lbl == primary_region
+        if lock:
+            lab_all = lab_cache[n]
+            lab_labels = lbl[mask]
+            new_rgb = img[..., :3][mask].copy()
+            for r, (g, ci) in targets.items():
+                sel = lab_labels == r
+                if not sel.any():
+                    continue
+                colors = pal_rgb[g]
+                if kinds[g] == "shades" and len(colors) > 1 and g in group_range:
+                    lo, hi = group_range[g]
+                    if hi - lo < 4:   # flat area: keep its assigned (neutral / detail) shade
+                        idx = np.full(int(sel.sum()), ci)
+                    else:
+                        t = np.clip((lab_all[sel, 0] - lo) / (hi - lo), 0, 1)
+                        idx = np.clip(np.round(t * (len(colors) - 1)).astype(int), 0, len(colors) - 1)
+                    new_rgb[sel] = colors[idx]
+                else:
+                    new_rgb[sel] = colors[ci]
+            out[..., :3][mask] = new_rgb
+            if palette_masks_out is not None:
+                for r, (g, _ci) in targets.items():
+                    palette_masks_out[n][g] |= (lbl == r) & mask
+            continue
         if palette_masks_out is not None:
             for r, (g, _ci) in targets.items():
                 palette_masks_out[n][g] |= (lbl == r) & mask
@@ -411,9 +452,9 @@ def recolor_regions_multi(imgs: Sequence[np.ndarray], masks: Sequence[np.ndarray
 
 def recolor_regions(img: np.ndarray, mask: np.ndarray, palettes: Sequence[Sequence[str]],
                     regions: int | None = None, strength: float = 1.0,
-                    kinds: Sequence[str] | None = None) -> np.ndarray:
+                    kinds: Sequence[str] | None = None, lock: bool = False) -> np.ndarray:
     """Single-image convenience wrapper around :func:`recolor_regions_multi`."""
-    outs, _ = recolor_regions_multi([img], [mask], palettes, kinds, regions, strength)
+    outs, _ = recolor_regions_multi([img], [mask], palettes, kinds, regions, strength, lock=lock)
     return outs[0]
 
 
@@ -423,6 +464,39 @@ def recolor_regions(img: np.ndarray, mask: np.ndarray, palettes: Sequence[Sequen
 
 SHINE_WORDS = {"metallic": "metallic", "metal": "metallic", "chrome": "metallic", "silk": "silk",
                "silky": "silk", "satin": "silk"}
+
+
+def quantize_to_palette(img: np.ndarray, mask: np.ndarray, palette: Sequence[str]) -> np.ndarray:
+    """Snap the masked pixels to exact palette colours by lightness rank (dark -> light)."""
+    out = img.copy()
+    if not mask.any() or not palette:
+        return out
+    colors = np.array(sorted((hex_to_rgb(c) for c in palette), key=lambda rgb: rgb_to_lab(np.array(rgb, float))[0]),
+                      dtype=np.uint8)
+    L = rgb_to_lab(img[..., :3][mask].astype(float))[:, 0]
+    lo, hi = np.percentile(L, 1), np.percentile(L, 99)
+    if hi - lo < 4 or len(colors) == 1:
+        idx = np.full(len(L), len(colors) // 2)
+    else:
+        t = np.clip((L - lo) / (hi - lo), 0, 1)
+        idx = np.clip(np.round(t * (len(colors) - 1)).astype(int), 0, len(colors) - 1)
+    out[..., :3][mask] = colors[idx]
+    return out
+
+
+def builtin_pattern(kind: str = "dots", size: int = 16) -> np.ndarray:
+    """Simple two-tone RGBA motif (white on transparent) used when no pattern is in the library."""
+    pat = np.zeros((size, size, 4), np.uint8)
+    yy, xx = np.mgrid[:size, :size]
+    if kind == "stripes":
+        on = (xx + yy) % size < size // 3
+    elif kind == "checks":
+        on = ((xx // (size // 2)) + (yy // (size // 2))) % 2 == 0
+    else:
+        c = (size - 1) / 2
+        on = (xx - c) ** 2 + (yy - c) ** 2 <= (size * 0.3) ** 2
+    pat[on] = (255, 255, 255, 255)
+    return pat
 
 
 def shine_kind(name: str) -> str | None:

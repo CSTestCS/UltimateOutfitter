@@ -15,7 +15,7 @@ from PIL import Image
 
 from .categories import CATEGORY_BY_NAME, CATEGORY_NAMES, O, Q, Question
 from .colors import extract_colors, extract_exact_colors, hex_to_rgb, palette_match, precision_to_threshold, rgb_to_hex, rgb_to_lab
-from .imaging import MIN_AUTO_ALPHA, apply_pattern, apply_shine, auto_mask, shine_kind, foreground_mask, load_rgba, recolor_regions_multi, save_rgba
+from .imaging import MIN_AUTO_ALPHA, apply_pattern, auto_mask, builtin_pattern, quantize_to_palette, shine_kind, foreground_mask, load_rgba, recolor_regions_multi, save_rgba
 from .patterns import load_pattern, pattern_score
 from .storage import Library, new_id, safe_name, unique_path, write_json_atomic
 from .traits import add_into, cosine, normalize
@@ -178,6 +178,7 @@ DEFAULT_GEN_SETTINGS = {
     "favourite_bias": 0.6,         # 0 = all matched palettes equally likely, 1 = mostly the best ones
     "rating_bias": 0.6,            # 0 = all suitable items equally likely, 1 = mostly the best ones
     "exhaustive": False,           # make every item in every palette (old behaviour)
+    "lock_palette": True,          # only exact palette colours / shades (no in-between colours)
     "seed": 1,
 }
 
@@ -486,15 +487,24 @@ class Character:
         return out
 
     def render_piece(self, item: dict, palettes: list[dict], pattern: dict | None,
-                     cache: dict | None = None, shine_out: list | None = None) -> list[np.ndarray]:
+                     cache: dict | None = None, shine_out: list | None = None,
+                     info_out: dict | None = None, lock: bool | None = None) -> list[np.ndarray]:
         """Recolour (and optionally print) every image of an item the same way.
 
-        Palettes whose name contains "metallic" or "silk" (also chrome / metal / satin) get a
-        shine on exactly the pixels they coloured; if no palette asks for it but the item's
-        own name does, the item's main palette shines. ``shine_out`` receives, per image,
-        the (mask, kind) pairs that were applied.
+        * ``lock`` (default: the character's "lock_palette" setting, on by default) restricts
+          the result to the exact palette colours / shades - no in-between colours.
+        * If a second / third palette ends up with nothing to colour (the image has fewer
+          colours than palettes), a pattern in that palette is added so it is still used.
+        * Palettes whose name contains "metallic" or "silk" (also chrome / metal / satin) do NOT
+          get a shine painted into the texture; instead the exact pixels they coloured are
+          returned as masks (``shine_out``: per image a list of (mask, kind)) and the 3D
+          preview renders the shine. If no palette asks for it but the item's own name does,
+          the item's main palette is used.
+        ``info_out`` receives {"pattern": dict or None} for an automatically added pattern.
         """
         cache = cache if cache is not None else {}
+        if lock is None:
+            lock = self.data.get("gen_settings", {}).get("lock_palette", True)
         if item["id"] not in cache:
             imgs = [load_rgba(self.library.abspath(rel)) for rel in Library.item_images(item)]
             cache.clear()
@@ -503,24 +513,59 @@ class Character:
         pal_masks: list = []
         outs, primaries = recolor_regions_multi(imgs, masks, [p["colors"] for p in palettes],
                                                 [p.get("kind", "varied") for p in palettes],
-                                                palette_masks_out=pal_masks)
-        if pattern:
-            pat, cut = load_pattern(self.library, pattern)
-            pat_palette = palettes[1]["colors"] if len(palettes) > 1 else palettes[0]["colors"]
-            whole = (item.get("attrs", {}).get("print") == "whole"
-                     or pattern.get("attrs", {}).get("placement") == "whole")
-            repeats = pattern.get("attrs", {}).get("repeats", 6)
-            for i, (out, mask, prim) in enumerate(zip(outs, masks, primaries)):
-                region = mask if whole or not prim.any() else prim & mask
+                                                palette_masks_out=pal_masks, lock=lock)
+
+        def print_pattern(pat, cut, colors, region_of, placement_whole, repeats, g=None):
+            for i, out in enumerate(outs):
+                region = region_of(i)
                 if not region.any():
                     continue
                 xs = np.flatnonzero(region.any(axis=0))
                 width = xs[-1] - xs[0] + 1
                 scale = max(0.05, width / max(repeats, 1) / pat.shape[1])
-                outs[i] = apply_pattern(out, region, pat, scale=scale, antialias=True,
-                                        palette=pat_palette, blend="shaded", cutaway=cut,
+                before = out.copy()
+                outs[i] = apply_pattern(out, region, pat, scale=scale, antialias=not lock, palette=colors,
+                                        blend="replace" if lock else "shaded", cutaway=cut,
                                         offset=(int(xs[0]), 0))
-        # metallic / silk shine, limited to the pixels of the palette that asks for it
+                printed = np.any(outs[i][..., :3] != before[..., :3], axis=-1) & region
+                if lock and printed.any():
+                    outs[i] = quantize_to_palette(outs[i], printed, colors)
+                if g is not None and pal_masks:
+                    for gg in range(len(pal_masks[i])):
+                        pal_masks[i][gg] &= ~printed
+                    pal_masks[i][g] |= printed
+
+        if pattern:
+            pat, cut = load_pattern(self.library, pattern)
+            g = 1 if len(palettes) > 1 else 0
+            whole = (item.get("attrs", {}).get("print") == "whole"
+                     or pattern.get("attrs", {}).get("placement") == "whole")
+            print_pattern(pat, cut, palettes[g]["colors"],
+                          lambda i: masks[i] if whole or not primaries[i].any() else primaries[i] & masks[i],
+                          whole, pattern.get("attrs", {}).get("repeats", 6), g)
+        # palettes that coloured nothing (image has too few colours) get a pattern instead
+        auto_pattern = None
+        if pal_masks:
+            for g in range(1, len(palettes)):
+                if any(pm[g].any() for pm in pal_masks):
+                    continue
+                if auto_pattern is None:
+                    rng = random.Random(f"{item['id']}-{'-'.join(p['id'] for p in palettes)}")
+                    fitting = [(pattern_score(p, item, self.traits), p) for p in self._usable_patterns()]
+                    fitting = [(sc, p) for sc, p in fitting if sc > 0.1 and (not pattern or p["id"] != pattern["id"])]
+                    if fitting:
+                        auto_pattern = rng.choices([p for _, p in fitting], weights=[sc for sc, _ in fitting])[0]
+                        pat, cut = load_pattern(self.library, auto_pattern)
+                        repeats = auto_pattern.get("attrs", {}).get("repeats", 6)
+                    else:
+                        kind = rng.choice(["dots", "stripes", "checks"])
+                        auto_pattern = {"id": f"builtin-{kind}", "name": kind.title(), "builtin": True}
+                        pat, cut, repeats = builtin_pattern(kind), None, 8
+                base = [pm[0].copy() for pm in pal_masks]
+                print_pattern(pat, cut, palettes[g]["colors"], lambda i, b=base: b[i] & masks[i], False, repeats, g)
+        if info_out is not None:
+            info_out["pattern"] = auto_pattern
+        # metallic / silk: masks only (the 3D preview draws the shine)
         shiny = [(g, shine_kind(p["name"])) for g, p in enumerate(palettes) if shine_kind(p["name"])]
         if not shiny and shine_kind(item["name"]):
             shiny = [(0, shine_kind(item["name"]))]
@@ -529,7 +574,6 @@ class Character:
             for g, kind in shiny:
                 m = pal_masks[i][g] & (outs[i][..., 3] >= MIN_AUTO_ALPHA) if pal_masks else None
                 if m is not None and m.any():
-                    outs[i] = apply_shine(outs[i], m, kind)
                     applied.append((m, kind))
             if shine_out is not None:
                 shine_out.append(applied)
@@ -559,9 +603,12 @@ class Character:
                 break
             shine: list = []
             try:
-                outs = self.render_piece(item, combo, pattern, cache, shine_out=shine)
+                info: dict = {}
+                outs = self.render_piece(item, combo, pattern, cache, shine_out=shine, info_out=info)
             except OSError:
                 continue
+            if pattern is None and info.get("pattern"):
+                pattern = info["pattern"]   # added because a palette had nothing else to colour
             base = safe_name(f"{self.name}-{item['name']}-{pal_names}" + (f"-{pattern['name']}" if pattern else ""))
             files = []
             first = unique_path(self.wardrobe_dir / f"{base}.png")

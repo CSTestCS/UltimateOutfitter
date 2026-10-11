@@ -107,12 +107,22 @@ The app never overwrites files it creates automatically. If a name is taken, it 
      can rebuild.
 
    **Metallic and silk shine:** if a palette's name contains *Metallic* (or *Metal* / *Chrome*) or *Silk* (or
-   *Satin*), the parts of each piece coloured with that palette get a shine. Metallic is high-contrast with
-   bright, sharp highlights; silk is a soft sheen. The app builds a mask of exactly the pixels that palette
-   coloured, so in `Hat-MetallicGreen+Purple` only the MetallicGreen parts shine and the Purple parts stay matte.
+   *Satin*), the parts of each piece coloured with that palette are marked as shiny. The texture itself is **not**
+   shaded - it keeps exactly the palette's colours - and the app saves a mask of exactly the pixels that palette
+   coloured (in `Wardrobe/Masks/`). The Interact tab's 3D preview uses the mask to make only those parts
+   reflective, so in `Hat-MetallicGreen+Purple` only the MetallicGreen parts shine and the Purple parts stay matte.
    If no palette asks for it but the item's own name does (e.g. "Silk Scarf"), the item's main palette shines.
-   The masks are saved in `Wardrobe/Masks/`. The Image Editor applies the same rule when you recolour with such a
-   palette, and *Add shine to selection* adds a shine by hand.
+   In the Image Editor, *Add shine to selection* paints a shine into an image by hand if you want one.
+
+   **Locked palette colours (default):** *Lock pieces to the exact palette colours / shades* (on by default; the
+   Image Editor has the same checkbox) makes every coloured pixel an exact colour from the palette, with no
+   in-between shading. For a *shades of one colour* palette each region is mapped onto the palette's shades: the
+   brightest part of the region takes the brightest shade, the darkest part the darkest shade, and everything in
+   between snaps to the shade at the same relative brightness. Untick it for the softer, shading-preserving recolour.
+
+   **Every palette shows up:** if a piece is made with two or three palettes but its image has only one colour,
+   a print is added so the extra palettes are used: a suitable pattern from your library when one fits, otherwise
+   simple dots / stripes / checks. The print's name is added to the file name.
 
    When colouring automatically, the app never touches pixels below 10% opacity, which leaves leftover
    cleanup specks alone. With a **shades of one colour** palette, the most neutral (middle) shade becomes the

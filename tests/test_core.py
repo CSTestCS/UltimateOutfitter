@@ -480,9 +480,8 @@ def test_metallic_palette_shines_only_its_own_parts(lib, tmp_path):
     plain = ch.render_piece(hat, [plain_green, purple], None, {})[0]
     (mask, kind), = shine[0]
     assert kind == "metallic" and mask.any()
-    changed = np.any(shiny != plain, axis=-1)
-    assert changed.any()
-    assert not (changed & ~mask).any()          # nothing outside the MetallicGreen parts changed
+    # the shine is a preview effect only - the texture keeps exactly the palette colours
+    assert (shiny == plain).all()
     # building the wardrobe names the piece after the palettes and saves the mask
     ch.data["palette_scan"]["matches"] = [{"palette_id": green["id"], "coverage": 1, "distance": 0},
                                           {"palette_id": purple["id"], "coverage": 1, "distance": 0}]
@@ -597,3 +596,40 @@ def test_vrm_textures_match_wardrobe_pieces(lib, tmp_path):
     del bra_entry["shine_masks"], bra_entry["shine"]
     found = vrm_match.match_wardrobe(ch, vrm)
     assert found[0]["shine"] and found[0]["shine"][0]["mask"]
+
+
+def test_palette_lock_uses_exact_shades(lib, tmp_path):
+    from ultimate_outfitter.core.imaging import recolor_regions
+    shades = ["#202020", "#606060", "#A0A0A0", "#E0E0E0"]
+    lib.add_palette("Greys", shades)
+    # a gradient garment: many grey levels in one region
+    arr = np.zeros((32, 64, 4), np.uint8)
+    for x in range(64):
+        v = 60 + x * 2
+        arr[:, x, :3] = (v, int(v * 0.6), int(v * 0.3))
+    arr[..., 3] = 255
+    mask = np.ones((32, 64), bool)
+    out = np.array(recolor_regions(arr, mask, [shades], kinds=["shades"], lock=True))
+    used = {"#%02X%02X%02X" % tuple(px) for px in out[..., :3].reshape(-1, 3)}
+    assert used <= set(shades)
+    assert "#%02X%02X%02X" % tuple(out[0, 0, :3]) == shades[0]     # darkest -> darkest
+    assert "#%02X%02X%02X" % tuple(out[0, -1, :3]) == shades[-1]   # brightest -> brightest
+    assert len(used) == len(shades)
+
+
+def test_extra_palette_on_single_colour_item_adds_pattern(lib, tmp_path):
+    a = lib.add_palette("Red", ["#B01010"])
+    b = lib.add_palette("Blue", ["#1030C0"])
+    arr = np.zeros((40, 40, 4), np.uint8)
+    arr[4:36, 4:36] = (150, 150, 150, 255)
+    src = tmp_path / "plain.png"
+    Image.fromarray(arr, "RGBA").save(src)
+    ans = _first_answers("Hats")
+    t, at = categories.evaluate_answers("Hats", ans)
+    hat = lib.add_item(src, "Plain Hat", "Hats", ans, t, at)
+    ch = _wardrobe_char(lib, tmp_path, [], build=False)
+    info: dict = {}
+    out = np.array(ch.render_piece(hat, [a, b], None, {}, info_out=info)[0])
+    assert info.get("pattern")
+    cols = {tuple(px) for px in out[out[..., 3] > 0][:, :3]}
+    assert (0xB0, 0x10, 0x10) in cols and (0x10, 0x30, 0xC0) in cols

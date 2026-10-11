@@ -224,8 +224,15 @@ class EditorTab(QWidget):
         sf = QFormLayout()
         sf.addRow("Strength", self.strength)
         rl.addLayout(sf)
+        self.lock_palette = QCheckBox("Lock to exact palette colours / shades")
+        self.lock_palette.setChecked(True)
+        self.lock_palette.setToolTip("Region mode: every pixel becomes an exact palette colour. Shades palettes map "
+                                     "the darkest part of a region to the darkest shade, the brightest to the "
+                                     "brightest, and everything between to the nearest relative shade.")
+        rl.addWidget(self.lock_palette)
         rl.addWidget(b_recolor)
-        rl.addWidget(QLabel("Palettes named “Metallic…” or “Silk…” add their shine automatically."))
+        rl.addWidget(QLabel("Metallic / silk palettes do not change the texture; the 3D preview adds the shine.\n"
+                            "Use this tool only if you want a shine painted into the image:"))
         shine_row = QHBoxLayout()
         self.shine_kind = QComboBox()
         self.shine_kind.addItem("Metallic shine", "metallic")
@@ -594,16 +601,9 @@ class EditorTab(QWidget):
             if p2:
                 pals.append(p2)
                 kinds.append(self._palette_kind(self.palette2_combo))
-            pal_masks: list = []
             outs, _ = imaging.recolor_regions_multi([self.image], [self.selection], pals, kinds,
-                                                    strength=strength, palette_masks_out=pal_masks)
+                                                    strength=strength, lock=self.lock_palette.isChecked())
             out = outs[0]
-            # a palette named "Metallic..." / "Silk..." shines only where it was applied
-            for g, combo in enumerate([self.palette_combo, self.palette2_combo][:len(pals)]):
-                pal = self.state.library.palettes.get(combo.currentData())
-                kind = imaging.shine_kind(pal["name"]) if pal else None
-                if kind and pal_masks and pal_masks[0][g].any():
-                    out = imaging.apply_shine(out, pal_masks[0][g], kind)
         self._commit(out)
 
     @busy

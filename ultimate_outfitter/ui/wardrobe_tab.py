@@ -250,6 +250,7 @@ class WardrobeTab(QWidget):
         self.fav_bias = self._pct("0% = every matched palette equally likely, 100% = mostly the best matches")
         self.rating_bias = self._pct("0% = every suitable item equally likely, 100% = mostly the best matches")
         self.exhaustive = QCheckBox("Exhaustive: every item in every palette (not realistic)")
+        self.lock_palette = QCheckBox("Lock pieces to the exact palette colours / shades (no added shading)")
         self.seed_label = QLabel()
         b_seed = QPushButton("New random seed")
         b_seed.setToolTip("Builds use a stored random seed; change it for a different selection")
@@ -272,6 +273,7 @@ class WardrobeTab(QWidget):
         seed_row.addWidget(b_seed)
         gf.addRow("Random seed", seed_row)
         gf.addRow(self.exhaustive)
+        gf.addRow(self.lock_palette)
         gf.addRow("Allowed patterns", self.patterns_list)
         gl.addLayout(gf)
         b_build = QPushButton("Build / update wardrobe (all items)")
@@ -415,6 +417,7 @@ class WardrobeTab(QWidget):
                        (self.rating_bias, "rating_bias")):
             w.setValue(int(round(gs.get(key, 0) * 100)))
         self.exhaustive.setChecked(gs.get("exhaustive", False))
+        self.lock_palette.setChecked(gs.get("lock_palette", True))
         self.seed_label.setText(str(gs.get("seed", 1)))
         excluded = set(gs.get("excluded_patterns", []))
         self.patterns_list.clear()
@@ -526,6 +529,7 @@ class WardrobeTab(QWidget):
         gs["favourite_bias"] = self.fav_bias.value() / 100
         gs["rating_bias"] = self.rating_bias.value() / 100
         gs["exhaustive"] = self.exhaustive.isChecked()
+        gs["lock_palette"] = self.lock_palette.isChecked()
         gs["excluded_patterns"] = [self.patterns_list.item(i).data(Qt.ItemDataRole.UserRole)
                                    for i in range(self.patterns_list.count())
                                    if self.patterns_list.item(i).checkState() != Qt.CheckState.Checked]
