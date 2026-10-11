@@ -132,6 +132,7 @@ class OutfitSession:
     slot_weights: dict[str, dict[str, float]] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     shop_slots: list[str] = field(default_factory=list)   # essential slots the wardrobe has nothing for
+    core_groups: list[list[str]] = field(default_factory=list)   # alternatives: dress OR top + bottoms...
     seed: int = field(default_factory=lambda: random.randrange(1 << 30))
 
     # ------------------------------------------------------------------ data
@@ -309,6 +310,7 @@ class OutfitSession:
         self.proposal = {}
         self.warnings = []
         required, optional, core_groups = self._slot_plan()
+        self.core_groups = core_groups
         owned = self.owned_slots()
         in_hamper: list[str] = []      # missing, but laundry would bring it back
         not_owned: list[str] = []      # missing, and laundry would not help
@@ -367,6 +369,53 @@ class OutfitSession:
             raise NoOutfitPossible(missing or ["everything"], bool(in_hamper), self.shop_slots)
         return self.proposal
 
+    # ---------------------------------------------------------- core alternatives
+    def core_group_of(self, slot: str) -> list[str] | None:
+        return next((g for g in self.core_groups if slot in g), None)
+
+    def _drop_group(self, group: list[str], keep: str | None = None) -> None:
+        for sl in group:
+            if sl == keep:
+                continue
+            for e in self.proposal.pop(sl, []):
+                self.approved.discard(e)
+
+    def _consider_legwear(self) -> None:
+        """After switching between a dress and a top + bottoms, tights / stockings are worth a look."""
+        if "legwear" in self.proposal or "legwear" in self.skipped_slots or self.context.is_underwear_only():
+            return
+        cands = self.candidates("legwear")
+        if cands and cands[0][0] >= 15:
+            self.proposal["legwear"] = [cands[0][1]["id"]]
+
+    def switch_core(self, slot: str) -> dict | None:
+        """Nothing is left for ``slot``: wear another core alternative (top + bottoms instead of a dress,
+        a dress instead of a top + bottoms...). Returns the first new piece, or None if none can be made."""
+        current = self.core_group_of(slot)
+        if not current:
+            return None
+        for group in self.core_groups:
+            if group is current or not all(self.candidates(sl) for sl in group):
+                continue
+            self._drop_group(current)
+            for sl in group:
+                self._fill_slot(sl)
+            self._consider_legwear()
+            names = "+".join(SLOTS[sl] for sl in group)
+            self.warnings.append(f"Nothing else suitable for {SLOTS[slot]} - trying {names} instead.")
+            return self.wardrobe[self.proposal[group[0]][0]]
+        return None
+
+    def shop_targets(self, slot: str) -> list[str]:
+        """Slots a shop visit for ``slot`` may fill: the slot and the other core alternatives' slots."""
+        targets = [slot]
+        current = self.core_group_of(slot)
+        if current:
+            for group in self.core_groups:
+                if group is not current:
+                    targets += [sl for sl in group if sl not in targets and not self.proposal.get(sl)]
+        return targets
+
     def _update_warnings(self) -> None:
         in_hamper, not_owned = getattr(self, "_missing", ([], []))
         missing = in_hamper + not_owned
@@ -375,7 +424,20 @@ class OutfitSession:
             self.warnings.append("Incomplete outfit - nothing suitable for: " + ", ".join(missing) + ".")
 
     def add_bought(self, slot: str, entry_id: str) -> None:
-        """Wear a piece just bought in the shop for ``slot``."""
+        """Wear a piece just bought in the shop for ``slot`` (it may belong to another core alternative:
+        a top bought instead of a dress replaces the dress pieces and fills the rest from the dresser)."""
+        entry = self.wardrobe.get(entry_id, {})
+        real = next((t for t in self.shop_targets(slot) if self.slot_accepts(t, entry.get("slot", slot))), slot)
+        old_group, new_group = self.core_group_of(slot), self.core_group_of(real)
+        if real != slot and old_group and new_group and new_group is not old_group:
+            self._drop_group(old_group)
+            if slot in self.shop_slots:
+                self.shop_slots.remove(slot)
+            for sl in new_group:
+                if sl != real and not self.proposal.get(sl) and not self._fill_slot(sl) and sl not in self.shop_slots:
+                    self.shop_slots.append(sl)
+            self._consider_legwear()
+            slot = real
         self.proposal.setdefault(slot, []).append(entry_id)
         self.skipped_slots.discard(slot)
         if slot in self.shop_slots:
@@ -460,7 +522,8 @@ class OutfitSession:
         if not cands:
             if not self.proposal.get(slot):
                 self.proposal.pop(slot, None)
-            return None
+            # e.g. every dress was rejected: try a top + bottoms instead (and the other way round)
+            return self.switch_core(slot)
         new = cands[0][1]
         self.proposal.setdefault(slot, []).append(new["id"])
         return new
@@ -537,18 +600,23 @@ def shop_offer(session: "OutfitSession", slot: str, rng: random.Random | None = 
     rng = rng or random.Random()
     lib = session.character.library
     avoid = session.slot_avoid_palettes.get(slot, set())
-    bad_cats = session.slot_excluded_categories.get(slot, set())
+    targets = session.shop_targets(slot)    # a dress may be replaced by a top (+ bottoms) and vice versa
+
+    def target_of(cat):
+        return next((t for t in targets if session.slot_accepts(t, cat.slot)), None)
+
     items = []
     for item in lib.items.values():
         cat = CATEGORY_BY_NAME.get(item["category"])
-        if not cat or not session.slot_accepts(slot, cat.slot):
+        target = target_of(cat) if cat else None
+        if not target:
             continue
-        if item["id"] in session.excluded_items or item["category"] in bad_cats:
+        if item["id"] in session.excluded_items or item["category"] in session.slot_excluded_categories.get(target, set()):
             continue
         items.append((item, cat))
     if not items:   # rejected everything - ignore the rejections rather than offer nothing
         items = [(i, CATEGORY_BY_NAME[i["category"]]) for i in lib.items.values()
-                 if i["category"] in CATEGORY_BY_NAME and session.slot_accepts(slot, CATEGORY_BY_NAME[i["category"]].slot)]
+                 if i["category"] in CATEGORY_BY_NAME and target_of(CATEGORY_BY_NAME[i["category"]])]
     palettes = [p for p in lib.palettes.values() if p["id"] not in avoid] or list(lib.palettes.values())
     if not items or not palettes:
         return None
@@ -557,7 +625,7 @@ def shop_offer(session: "OutfitSession", slot: str, rng: random.Random | None = 
     for item, cat in items:
         fake = {"id": f"shop-{item['id']}", "item_id": item["id"], "category": item["category"],
                 "palettes": [], "slot": cat.slot, "rating": 50}
-        scored.append((session.score(fake, slot), item, cat))
+        scored.append((session.score(fake, target_of(cat)), item, cat))
     best = max(sc for sc, _, _ in scored)
     suitable = [(item, cat) for sc, item, cat in scored if sc >= best - 20]
     item, cat = rng.choice(suitable)
@@ -567,7 +635,7 @@ def shop_offer(session: "OutfitSession", slot: str, rng: random.Random | None = 
     fitting = [p for p in lib.patterns.values() if pattern_fits(p, item)]
     if fitting and rng.random() < 0.3:
         pattern = rng.choice(fitting)
-    return {"item": item, "palettes": combo, "pattern": pattern, "score": 50, "slot": slot}
+    return {"item": item, "palettes": combo, "pattern": pattern, "score": 50, "slot": target_of(cat)}
 
 
 def buy(character: Character, offer: dict) -> dict | None:

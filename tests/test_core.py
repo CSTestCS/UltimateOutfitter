@@ -789,3 +789,30 @@ def test_shop_offers_and_buys_missing_pieces(lib, tmp_path):
     # clashing palettes rejected for the slot are not offered
     s.slot_avoid_palettes["footwear"] = {p["id"] for p in list(lib.palettes.values())[:-1]}
     assert all(p["id"] not in s.slot_avoid_palettes["footwear"] for p in shop_offer(s, "footwear", rng)["palettes"])
+
+
+def test_rejecting_every_dress_switches_to_top_and_bottoms(lib, tmp_path):
+    import random
+    from ultimate_outfitter.core.outfit import shop_offer
+    ch = _wardrobe_char(lib, tmp_path, ["Underwear Bottoms", "Bras", "Shoes", "Dresses", "Shirts", "Skirts",
+                                        "Leggings/Tights"])
+    s = OutfitSession(ch, DayContext("Casual / errands", "Calm", "Warm"))
+    s.build()
+    s._drop_group(["base_top", "legs"])          # start from the dress, whatever the build preferred
+    s.proposal["full_body"] = [next(e["id"] for e in s.dresser_entries() if e["slot"] == "full_body")]
+    s.proposal.pop("legwear", None)
+    new = s.reject(s.proposal["full_body"][0], "style")
+    assert new and new["slot"] in ("base_top", "legs")
+    assert s.proposal.get("base_top") and s.proposal.get("legs") and not s.proposal.get("full_body")
+    assert s.proposal.get("legwear")             # tights are considered with the new set
+    # no dress left after rejecting the top too: nothing to switch back to
+    assert s.reject(s.proposal["base_top"][0], "style") is None
+    # shopping for a missing top may offer a dress, and buying it replaces top + bottoms
+    rng = random.Random(2)
+    slots = {shop_offer(s, "base_top", rng)["slot"] for _ in range(30)}
+    assert "full_body" in slots and "base_top" in slots
+    from ultimate_outfitter.core.outfit import buy
+    offer = next(o for o in (shop_offer(s, "base_top", rng) for _ in range(50)) if o["slot"] == "full_body")
+    entry = buy(ch, offer)
+    s.add_bought("base_top", entry["id"])
+    assert s.proposal["full_body"] == [entry["id"]] and not s.proposal.get("legs") and not s.proposal.get("base_top")

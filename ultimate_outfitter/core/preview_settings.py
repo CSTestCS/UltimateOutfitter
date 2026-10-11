@@ -20,7 +20,7 @@ FILE_NAME = "preview_settings.txt"
 # key: (default, minimum, maximum, comment)
 NUMBERS = {
     "wet thin opacity": (0.7, 0.0, 1.0, "opacity of thin clothing while wet (1 = not see-through)"),
-    "metallic shine": (1.0, 0.0, 3.0, "strength of metallic reflections (0 = off)"),
+    "metallic shine": (1.0, 0.0, 3.0, "strength of metallic reflections (0 = off, 0.1 = barely, 1 = polished)"),
     "silk shine": (1.0, 0.0, 3.0, "strength of the silk sheen (0 = off)"),
     "wet shine": (1.0, 0.0, 3.0, "strength of the wet gloss on the whole character (0 = off)"),
     "wet darkening": (0.25, 0.0, 0.9, "how much darker clothing, hair and accessories get while wet "
