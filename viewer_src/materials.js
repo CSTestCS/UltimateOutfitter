@@ -19,19 +19,22 @@ let rules = { overrides: {} };
 // strengths from preview_settings.txt
 let settings = { metallic: 1, silk: 1, wetShine: 1, darken: 0.25, level: 1 };
 
-// effective strengths: preview_settings.txt value x the Interact tab's Shine level
+// effective strengths from preview_settings.txt (0 = off, 1 = full, above 1 = brighter)
 const metalS = () => settings.metallic * settings.level;
 const silkS = () => settings.silk * settings.level;
 const wetS = () => settings.wetShine * settings.level;
+// how much of the full effect is blended in: every level up to full is a visible step
+// (faint ~0.22, very low ~0.32, low ~0.49, medium ~0.66, high ~0.84, full 1)
+const mix = (v) => (v <= 0 ? 0 : Math.min(1, Math.pow(v, 0.6)));
+// levels above full make the effect brighter instead
+const boost = (v) => Math.max(1, v);
 
-// weak metal is a mostly matte, slightly reflective surface; full strength is polished metal
-function tuneMetal(m, masked) {
-  const sv = metalS();
-  const t = Math.min(1, sv);
-  m.metalness = 0.1 + 0.9 * t;
-  m.roughness = 0.22 + 0.5 * (1 - t);
-  m.envMapIntensity = envIntensity * 1.2 * Math.max(0.15, sv);
-  if (masked) m.userData.baseOpacity = Math.min(1, 0.15 + 0.85 * t);
+// metal is always polished metal, blended over the model's own look by the level
+function tuneMetal(m) {
+  m.metalness = 1.0;
+  m.roughness = 0.22;
+  m.envMapIntensity = envIntensity * 1.2 * boost(metalS());
+  m.userData.baseOpacity = mix(metalS());
 }
 let glossEnv = null;       // dark environment with a few bright panels: sharp highlights, no haze
 let wet = { on: false, strength: 1, thin: [], thinOpacity: 0.7 };
@@ -123,30 +126,13 @@ function classify(e) {
   return { effect: null, why: '' };
 }
 
-function makeMetal(src, json) {
-  const color = src.color ? src.color.clone() : new THREE.Color(1, 1, 1);
-  const m = new THREE.MeshStandardMaterial({
-    name: src.name + ' (metal preview)',
-    map: src.map || null,
-    color,
-    metalness: 1.0,
-    roughness: Math.min(0.45, Math.max(0.12, json.roughnessFactor < 1 ? json.roughnessFactor : 0.25)),
-    normalMap: src.normalMap || null,
-    transparent: src.transparent,
-    opacity: src.opacity ?? 1,
-    alphaTest: src.alphaTest || 0,
-    side: src.side,
-    envMapIntensity: envIntensity * 1.2 * settings.metallic,
-  });
-  return m;
-}
-
 function glossMaterial(src) {
   // black base + additive blending: only the specular / clearcoat highlights are added on top
   const m = new THREE.MeshPhysicalMaterial({
     color: 0x000000,
     map: src && src.map ? src.map : null,
-    alphaTest: src && src.map ? Math.max(src.alphaTest || 0, 0.3) : 0,
+    // low cut-off: only fully transparent texels (hair cut-outs) are skipped, so weak levels still show
+    alphaTest: src && src.map ? 0.02 : 0,
     roughness: 0.2,
     metalness: 0,
     clearcoat: 1,
@@ -227,13 +213,9 @@ function reclassify() {
     const c = classify(e);
     e.effect = c.effect;
     e.why = c.why;
-    if (e.effect === 'metallic' && metalS() > 0) {
-      if (!e.metal) e.metal = makeMetal(e.original, e.json);
-      setSlot(e, e.metal);
-    } else {
-      setSlot(e, e.original);
-    }
+    setSlot(e, e.original);   // metal is drawn as a blended layer on top (see buildEffectOverlays)
   }
+  buildEffectOverlays();
   apply();
 }
 
@@ -256,16 +238,15 @@ function apply() {
     mat.opacity = opacity;
     if (mat === e.original) mat.depthWrite = seeThrough ? false : e.base.depthWrite;
     e.seeThrough = seeThrough;
-    if (e.metal) tuneMetal(e.metal, false);
     applyDarkening(e);
     for (const o of effectOverlays) {
       const ms = Array.isArray(o.material) ? o.material : [o.material];
       for (const m of ms) {
         if (!m.userData.effectKind) continue;
-        if (m.userData.effectKind === 'metallic') tuneMetal(m, true);
+        if (m.userData.effectKind === 'metallic') tuneMetal(m);
         if (m.userData.effectKind === 'silk') {
-          m.userData.baseOpacity = 0.35 * Math.min(1, silkS());
-          m.envMapIntensity = Math.max(0.6, envIntensity) * 0.5 * silkS();
+          m.userData.baseOpacity = 0.85 * mix(silkS());
+          m.envMapIntensity = Math.max(0.6, envIntensity) * 0.9 * boost(silkS());
         }
         // see-through thin clothing: the shine layer fades with the fabric
         const ent = m.userData.entry;
@@ -285,17 +266,16 @@ function apply() {
       g.roughness = 0.12;
       g.clearcoat = 1;
       g.clearcoatRoughness = 0.04;
-      g.opacity = Math.min(1, 0.85 * wet.strength * wetS());
-      g.envMapIntensity = Math.max(0.6, envIntensity) * 1.1 * wetS();
-      g.clearcoatRoughness = 0.04 + 0.25 * (1 - Math.min(1, wetS()));
+      g.opacity = Math.min(1, 0.85 * wet.strength * mix(wetS()));
+      g.envMapIntensity = Math.max(0.6, envIntensity) * 1.1 * boost(wetS());
     } else if (e.effect === 'silk' && silkS() > 0) {
       g.visible = true;
       g.envMap = glossEnv;
-      g.roughness = 0.4;
-      g.clearcoat = 0.3;
-      g.clearcoatRoughness = 0.35;
-      g.opacity = Math.min(1, 0.45 * silkS());
-      g.envMapIntensity = Math.max(0.6, envIntensity) * 0.5 * silkS();
+      g.roughness = 0.3;
+      g.clearcoat = 0.7;
+      g.clearcoatRoughness = 0.22;
+      g.opacity = Math.min(1, 0.85 * mix(silkS()));
+      g.envMapIntensity = Math.max(0.6, envIntensity) * 0.9 * boost(silkS());
     } else {
       g.visible = false;
     }
@@ -354,20 +334,27 @@ function maskedEffectMaterial(e, kind, mask) {
       map: src.map || null, color: src.color ? src.color.clone() : new THREE.Color(1, 1, 1),
       metalness: 1.0, roughness: 0.22, alphaMap: mask, transparent: true, depthWrite: false,
       polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1, side: src.side,
-      envMapIntensity: envIntensity * 1.2 * settings.metallic,
+      envMapIntensity: envIntensity * 1.2 * boost(metalS()),
     });
   }
   const g = glossMaterial(src);   // silk: soft additive sheen limited by the mask
   g.alphaMap = mask;
   g.envMap = glossEnv;
-  g.roughness = 0.4; g.clearcoat = 0.3; g.clearcoatRoughness = 0.35; g.opacity = 0.35 * Math.min(1, silkS());
-  g.envMapIntensity = Math.max(0.6, envIntensity) * 0.5 * silkS();
+  g.roughness = 0.3; g.clearcoat = 0.7; g.clearcoatRoughness = 0.22; g.opacity = 0.85 * mix(silkS());
+  g.envMapIntensity = Math.max(0.6, envIntensity) * 0.9 * boost(silkS());
   return g;
 }
 
 function buildEffectOverlays() {
   clearEffectOverlays();
   for (const e of entries) {
+    // whole parts that are metal (names, materials.txt, or an unmasked wardrobe match)
+    if (e.effect === 'metallic') {
+      const mat = maskedEffectMaterial(e, 'metallic', null);
+      mat.userData.effectKind = 'metallic';
+      mat.userData.entry = e;
+      slotOverlay(e, mat);
+    }
     if (!e.match) continue;
     for (const s of e.match.shine || []) {
       if (!s.maskUrl) continue;
@@ -377,7 +364,7 @@ function buildEffectOverlays() {
       const mat = maskedEffectMaterial(e, s.kind, mask);
       mat.userData.effectKind = s.kind;
       mat.userData.entry = e;
-      mat.userData.baseOpacity = mat.opacity;
+      if (s.kind !== 'metallic') mat.userData.baseOpacity = mat.opacity;
       slotOverlay(e, mat);
     }
   }
@@ -385,7 +372,7 @@ function buildEffectOverlays() {
 
 export function setMatches(list) {
   matches = list || [];
-  if (entries.length) { reclassify(); buildEffectOverlays(); apply(); }
+  if (entries.length) reclassify();
 }
 
 export function setRules(r) {
@@ -395,7 +382,7 @@ export function setRules(r) {
 
 export function setSettings(v) {
   settings = Object.assign({ metallic: 1, silk: 1, wetShine: 1, darken: 0.25, level: 1 }, v || {});
-  if (entries.length) { reclassify(); buildEffectOverlays(); apply(); }
+  if (entries.length) reclassify();
 }
 
 // ---------------------------------------------------------------------------

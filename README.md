@@ -238,7 +238,7 @@ modified.
   | Setting | Default | Meaning |
   |---|---|---|
   | `wet thin opacity` | 0.7 | opacity of thin clothing while wet (1 = not see-through) |
-  | `metallic shine` | full | metallic reflections - weak levels look mostly matte, full is polished metal |
+  | `metallic shine` | full | metallic reflections - each level blends in more polished metal; full is fully metal |
   | `silk shine` | full | the silk / satin sheen |
   | `wet shine` | full | the wet gloss on the whole character |
   | `wet darkening` | 0.25 | how much darker clothing, hair and accessories get while wet |

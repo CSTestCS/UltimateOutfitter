@@ -26,7 +26,7 @@ LEVEL_HELP = "off, faint, very low, low, medium, high, full, extra, maximum - or
 # key: (default, minimum, maximum, comment)
 NUMBERS = {
     "wet thin opacity": (0.7, 0.0, 1.0, "opacity of thin clothing while wet (1 = not see-through)"),
-    "metallic shine": (1.0, 0.0, 3.0, "metallic reflections: weak levels look mostly matte, full is polished metal"),
+    "metallic shine": (1.0, 0.0, 3.0, "metallic reflections: each level blends in more polished metal, full is fully metal"),
     "silk shine": (1.0, 0.0, 3.0, "the silk / satin sheen"),
     "wet shine": (1.0, 0.0, 3.0, "the wet gloss on the whole character (rain, swimming, heat)"),
     "wet darkening": (0.25, 0.0, 0.9, "how much darker clothing, hair and accessories get while wet "
