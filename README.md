@@ -219,12 +219,14 @@ modified.
   `Hat-MetallicGreen+Purple` just the MetallicGreen parts reflect. *Silk…* palettes get a soft sheen the same way.
   A piece whose clothing item is marked **thin** becomes see-through while wet. Older pieces made before shine masks
   existed get theirs generated automatically. The status line under the viewport lists what was matched. Skin,
-  face, eye and hair materials are never matched (their textures can look like a garment drawn on the same body
-  layout).
-* **Fallback:** model parts that don't match the wardrobe still count as **metallic** when their material or
-  texture name says so (metallic, metal, chrome, silver, gold, steel, armor). VRoid's matcap textures are no
-  longer treated as metal, since VRoid puts them on many parts that are not metal.
-* **Silk** or **satin** parts get a soft fabric sheen that glows towards the edges. It is always on for those
+  face and eye materials are never matched (their textures can look like a garment drawn on the same body
+  layout). Hair materials are matched like clothing, since VRoid's hair system is also used for capes, ribbons
+  and other pieces.
+* **Only wardrobe pieces shine:** metallic and silk effects come only from matched wardrobe pieces that have those
+  effects, or from rules you write in `materials.txt`. Material names, VRoid's matcap textures and the glTF
+  metallic value are never used. The wet look is the exception: it covers the whole character when the conditions
+  call for it.
+* **Silk** pieces get a soft fabric sheen that glows towards the edges. It is always on for those
   parts and looks different from the wet look, which adds sharp, mirror-like highlights to the whole character.
 * **Wet look:** when the character is swimming, it's raining, or the weather is **scorching hot** (sweat), the
   whole character - skin, hair, clothing and accessories - gets crisp glossy highlights. Clothing that isn't thin,

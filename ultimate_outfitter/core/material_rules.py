@@ -54,8 +54,8 @@ HEADER = """# Material rules for {name}'s 3D preview (VRoid model) - OPTIONAL
 # Matching is case-insensitive and uses the longest matching rule. Use "List model materials"
 # in the Interact tab to see the material names and what was detected.
 #
-# Automatic detection (no rule needed): material or texture names containing metallic, metal,
-# chrome, silver, gold, steel, armor (-> metallic) or silk, satin (-> silk).
+# Without rules, metallic / silk effects come only from wardrobe pieces matched to the model's
+# textures (material names are not used).
 #
 # Examples:
 # Bra = metallic

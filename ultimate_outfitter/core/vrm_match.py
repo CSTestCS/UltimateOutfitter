@@ -19,9 +19,10 @@ import numpy as np
 from PIL import Image
 
 SIG_SIZE = 48
-# model parts that are never clothing: their textures can look like a garment drawn on the same body
-# UV layout (VRoid names them ..._SKIN, ..._FACE, ..._EYE, ..._HAIR), so they are never matched
-NOT_CLOTHING = re.compile(r"skin|face|eye|mouth|brow|lash|teeth|tongue|iris|hair", re.I)
+# the body itself is never a wardrobe piece: its skin texture can look like a garment drawn on the same
+# body UV layout (VRoid names these ..._SKIN, ..._FACE, ..._EYE). Hair materials CAN be clothing
+# (VRoid's hair system is used for capes, ribbons...), so they are matched like any other part.
+NOT_CLOTHING = re.compile(r"skin|face|eye|mouth|brow|lash|teeth|tongue|iris", re.I)
 MATCH_THRESHOLD = 14.0     # mean colour difference (0-255) allowed for a match
 
 

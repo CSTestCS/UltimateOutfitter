@@ -7,8 +7,6 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 const NEVER_SEE_THROUGH = /skin|body|face|eye|hair|mouth|brow|lash|teeth|tongue|iris|highlight/i;
 // parts that never get darker when wet (skin and face); hair, clothing and accessories do
 const SKIN = /skin|face|eye|mouth|brow|lash|teeth|tongue|iris|highlight/i;
-const METAL_WORDS = /metallic|metal|chrome|silver|gold|steel|iron|armor|armour/i;
-const SILK_WORDS = /silk|satin/i;
 
 let renderer = null;
 let scene = null;
@@ -99,8 +97,9 @@ function overrideFor(name) {
 }
 
 function matchFor(e) {
-  // skin, face, eyes and hair are never wardrobe pieces, whatever their texture looks like
-  if (SKIN.test(e.name) || /hair/i.test(e.name)) return null;
+  // the body (skin, face, eyes) is never a wardrobe piece, whatever its texture looks like;
+  // hair materials can be clothing made with VRoid's hair system, so they may match
+  if (SKIN.test(e.name)) return null;
   return matches.find((m) => m.material === e.name) || null;
 }
 
@@ -120,9 +119,7 @@ function classify(e) {
   if (ov === 'none' || ov === 'thin' || ov === 'thick') e.forced = ov;
   if (ov === 'metallic' || ov === 'silk') return { effect: ov, why: 'materials.txt' };
   if (ov === 'none') return { effect: null, why: 'materials.txt' };
-  const tname = texName(e.original.map);
-  if (METAL_WORDS.test(name) || METAL_WORDS.test(tname)) return { effect: 'metallic', why: 'name' };
-  if (SILK_WORDS.test(name) || SILK_WORDS.test(tname)) return { effect: 'silk', why: 'name' };
+  // metallic / silk come only from wardrobe pieces (or materials.txt) - never from model names
   // note: the glTF metallicFactor and VRoid's matcap textures are NOT used - exporters set them on
   // many materials that are not metal, which made the choice look random
   return { effect: null, why: '' };
