@@ -792,8 +792,15 @@ def test_rejecting_every_dress_switches_to_top_and_bottoms(lib, tmp_path):
     assert new and new["slot"] in ("base_top", "legs")
     assert s.proposal.get("base_top") and s.proposal.get("legs") and not s.proposal.get("full_body")
     assert s.proposal.get("legwear")             # tights are considered with the new set
+    # rejecting bottoms never switches to a dress, and never touches the (approved) top
+    top = s.proposal["base_top"][0]
+    s.approve(top)
+    assert s.reject(s.proposal["legs"][0], "style") is None
+    assert s.proposal["base_top"] == [top] and top in s.approved and not s.proposal.get("full_body")
+    assert "full_body" not in s.shop_targets("legs")
     # no dress left after rejecting the top too: nothing to switch back to
-    assert s.reject(s.proposal["base_top"][0], "style") is None
+    s.approved.discard(top)
+    assert s.reject(top, "style") is None
     # shopping for a missing top may offer a dress, and buying it replaces top + bottoms
     rng = random.Random(2)
     slots = {shop_offer(s, "base_top", rng)["slot"] for _ in range(30)}
@@ -847,3 +854,17 @@ def test_similar_texture_is_not_the_piece(lib, tmp_path):
     _write_glb(vrm, [("N00_000_Hair_00_HAIR", similar), ("N00_005_Hair_01_HAIR_Capelet", exact)])
     found = vrm_match.match_wardrobe(ch, vrm)
     assert [m["material"] for m in found] == ["N00_005_Hair_01_HAIR_Capelet"]
+
+
+def test_switch_never_replaces_approved_pieces(lib, tmp_path):
+    ch = _wardrobe_char(lib, tmp_path, ["Underwear Bottoms", "Bras", "Shoes", "Dresses", "Shirts", "Skirts"])
+    s = OutfitSession(ch, DayContext("Casual / errands", "Calm", "Warm"))
+    s.build()
+    s._drop_group(["full_body"])
+    s.proposal["base_top"] = [next(e["id"] for e in s.dresser_entries() if e["slot"] == "base_top")]
+    s.proposal["legs"] = [next(e["id"] for e in s.dresser_entries() if e["slot"] == "legs")]
+    bottoms = s.proposal["legs"][0]
+    s.approve(bottoms)
+    # the only top is rejected, but the approved bottoms keep the outfit a top + bottoms
+    assert s.reject(s.proposal["base_top"][0], "style") is None
+    assert s.proposal["legs"] == [bottoms] and not s.proposal.get("full_body")

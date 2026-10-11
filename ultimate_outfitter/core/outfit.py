@@ -118,6 +118,10 @@ class NoOutfitPossible(Exception):
         super().__init__(", ".join(missing))
 
 
+# rejecting / shopping for these may switch between a dress and a top + bottoms (never bottoms)
+SWITCH_SLOTS = {"full_body", "base_top", "swim_full", "swim_top", "sleepwear"}
+
+
 @dataclass
 class OutfitSession:
     character: Character
@@ -388,10 +392,25 @@ class OutfitSession:
         if cands and cands[0][0] >= 15:
             self.proposal["legwear"] = [cands[0][1]["id"]]
 
-    def switch_core(self, slot: str) -> dict | None:
-        """Nothing is left for ``slot``: wear another core alternative (top + bottoms instead of a dress,
-        a dress instead of a top + bottoms...). Returns the first new piece, or None if none can be made."""
+    def _may_switch(self, slot: str) -> list[str] | None:
+        """The core group a dress <-> top switch may replace, or None.
+
+        Only running out of tops / dresses (or one-piece swim / sleepwear, or swim tops) switches:
+        rejected bottoms never do, and a group that has an approved piece is never replaced.
+        """
+        if slot not in SWITCH_SLOTS:
+            return None
         current = self.core_group_of(slot)
+        if not current:
+            return None
+        if any(e in self.approved for sl in current if sl != slot for e in self.proposal.get(sl, [])):
+            return None
+        return current
+
+    def switch_core(self, slot: str) -> dict | None:
+        """Nothing is left for a top / dress ``slot``: wear the other core alternative (top + bottoms
+        instead of a dress, a dress instead of a top + bottoms). Returns the first new piece, or None."""
+        current = self._may_switch(slot)
         if not current:
             return None
         for group in self.core_groups:
@@ -409,7 +428,7 @@ class OutfitSession:
     def shop_targets(self, slot: str) -> list[str]:
         """Slots a shop visit for ``slot`` may fill: the slot and the other core alternatives' slots."""
         targets = [slot]
-        current = self.core_group_of(slot)
+        current = self._may_switch(slot)
         if current:
             for group in self.core_groups:
                 if group is not current:
@@ -428,7 +447,7 @@ class OutfitSession:
         a top bought instead of a dress replaces the dress pieces and fills the rest from the dresser)."""
         entry = self.wardrobe.get(entry_id, {})
         real = next((t for t in self.shop_targets(slot) if self.slot_accepts(t, entry.get("slot", slot))), slot)
-        old_group, new_group = self.core_group_of(slot), self.core_group_of(real)
+        old_group, new_group = self._may_switch(slot), self.core_group_of(real)
         if real != slot and old_group and new_group and new_group is not old_group:
             self._drop_group(old_group)
             if slot in self.shop_slots:
