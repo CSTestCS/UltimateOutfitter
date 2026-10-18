@@ -144,7 +144,8 @@ The app never overwrites files it creates automatically. If a name is taken, it 
    choose the item, up to three palettes, an optional print (placement and number of repeats), the 3D preview shine
    (automatic from names, none, or metallic / silk on a chosen palette), whether colours are locked to the exact
    palette, and whether a print may be added for an unused palette. A live preview shows the result. The piece is
-   saved and named like generated ones and goes into the dresser.
+   saved and named like generated ones and goes into the dresser. The dialog remembers the options of the last
+   piece you added (per character) and starts from them next time.
 
    **Add to wardrobe (another batch)** works like *Build*, but instead of only topping the wardrobe up to the
    planned size it adds a whole new batch on top of what the character already owns, using the same settings.

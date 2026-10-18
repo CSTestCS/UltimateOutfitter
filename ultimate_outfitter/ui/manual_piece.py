@@ -116,6 +116,54 @@ class ManualPieceDialog(QDialog):
         lay.addLayout(row, 1)
         lay.addWidget(bb)
         self._fill_items()
+        self._restore_last()
+
+    # ------------------------------------------------------------ remembered options
+    LAST_KEY = "manual_piece_last"
+
+    def _restore_last(self):
+        """Start from the options used for the last piece added (missing items / palettes are skipped)."""
+        last = self.character.data.get(self.LAST_KEY)
+        if not last:
+            return
+
+        def norm(v):
+            return list(v) if isinstance(v, (list, tuple)) else v
+
+        def choose(combo, value):
+            for i in range(combo.count()):
+                if norm(combo.itemData(i)) == norm(value):
+                    combo.setCurrentIndex(i)
+                    return
+
+        if last.get("item") in self.lib.items:
+            choose(self.item, last["item"])
+        for combo, pid in zip(self.pal, (last.get("palettes") or []) + [None, None, None]):
+            if pid is None or pid in self.lib.palettes:
+                choose(combo, pid)
+        if last.get("pattern") is None or last["pattern"] in self.lib.patterns:
+            choose(self.pattern, last.get("pattern"))
+        choose(self.placement, last.get("placement"))
+        if last.get("repeats"):
+            self.repeats.setValue(int(last["repeats"]))      # after the pattern, which resets it
+        choose(self.shine, last.get("shine"))
+        if "lock" in last:
+            self.lock.setChecked(bool(last["lock"]))
+        if "auto_print" in last:
+            self.auto_print.setChecked(bool(last["auto_print"]))
+
+    def _remember(self):
+        self.character.data[self.LAST_KEY] = {
+            "item": self.item.currentData(),
+            "palettes": [c.currentData() for c in self.pal],
+            "pattern": self.pattern.currentData(),
+            "placement": self.placement.currentData(),
+            "repeats": self.repeats.value(),
+            "shine": list(self.shine.currentData()) if isinstance(self.shine.currentData(), (list, tuple))
+            else self.shine.currentData(),
+            "lock": self.lock.isChecked(),
+            "auto_print": self.auto_print.isChecked(),
+        }
 
     # ------------------------------------------------------------ choices
     def _fill_items(self, *_):
@@ -218,4 +266,6 @@ class ManualPieceDialog(QDialog):
             QMessageBox.warning(self, "Add piece", "The piece could not be created (is the item image missing?).")
             return
         self.entry = created[0]
+        self._remember()
+        self.character.save()
         self.accept()
