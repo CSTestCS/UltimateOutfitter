@@ -237,8 +237,13 @@ MIN_AUTO_ALPHA = 26  # 10% opacity: fainter pixels (cleanup dregs) are never aut
 
 
 def auto_mask(img: np.ndarray) -> np.ndarray:
-    """Pixels that automatic colouring may touch: the subject, at least 10% opaque."""
-    return foreground_mask(img) & (img[..., 3] >= MIN_AUTO_ALPHA)
+    """Pixels that automatic colouring may touch: every pixel at least 10% opaque.
+
+    Only transparency decides. No "background" is guessed from the border colour: clothing images are
+    often full-canvas textures (e.g. VRoid UV textures) whose border colour IS part of the garment, and
+    removing it left only a stripe or a detail to recolour.
+    """
+    return img[..., 3] >= MIN_AUTO_ALPHA
 
 
 def color_regions(img: np.ndarray, mask: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:

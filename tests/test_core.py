@@ -1024,3 +1024,25 @@ def test_pattern_colour_and_material_options(lib, tmp_path):
     assert any(r > g + 40 for r, g, b in own)               # keeps the pattern's own red
     _, shine = render(material="silk")
     assert shine[0] and shine[0][0][1] == "silk" and shine[0][0][0].any()
+
+
+def test_opaque_textures_are_coloured_everywhere(lib, tmp_path):
+    """Full-canvas textures (no transparency): the border colour is part of the garment, not background."""
+    from ultimate_outfitter.core.imaging import auto_mask
+    pink = np.zeros((64, 128, 4), np.uint8)
+    pink[..., :3] = (255, 0, 128)
+    pink[56:, :, :3] = (0, 140, 30)          # a green hem along the bottom
+    pink[..., 3] = 255
+    assert auto_mask(pink).all()
+    Image.fromarray(pink, "RGBA").save(tmp_path / "skirt.png")
+    a = lib.add_palette("Navy", ["#101840"])
+    b = lib.add_palette("Gold", ["#C09030"])
+    ans = _first_answers("Skirts")
+    t, at = categories.evaluate_answers("Skirts", ans)
+    skirt = lib.add_item(tmp_path / "skirt.png", "Skirt", "Skirts", ans, t, at)
+    ch = _wardrobe_char(lib, tmp_path, [], build=False)
+    out = ch.render_piece(skirt, [a, b], None, {}, auto_pattern=False)[0]
+    body, hem = out[:50, :, :3].reshape(-1, 3), out[58:, :, :3].reshape(-1, 3)
+    assert not (body == (255, 0, 128)).all(axis=1).any()      # the pink body was recoloured too
+    assert {tuple(px) for px in body} | {tuple(px) for px in hem} <= {(0x10, 0x18, 0x40), (0xC0, 0x90, 0x30)}
+    assert {tuple(px) for px in body} != {tuple(px) for px in hem}   # body and hem got different palettes

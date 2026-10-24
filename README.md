@@ -135,6 +135,10 @@ The app never overwrites files it creates automatically. If a name is taken, it 
    (e.g. grey dots on the grey parts of a white / grey / black piece), it takes the palette's neighbouring colour
    there instead, while on parts of another colour it may still use that grey.
 
+   Automatic colouring treats every visible pixel of an item image as part of the garment: only transparency
+   decides what is left alone, so full-canvas textures (such as VRoid UV textures, with no transparent
+   background) are coloured everywhere, including their border colour.
+
    When colouring automatically, the app never touches pixels below 10% opacity, which leaves leftover
    cleanup specks alone. With a **shades of one colour** palette, the most neutral (middle) shade becomes the
    main colour, and the lighter and darker shades are used for highlights, shading and details.
