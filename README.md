@@ -79,6 +79,12 @@ The app never overwrites files it creates automatically. If a name is taken, it 
 * **Selection tools:** magic wand (connected colour), select colour (whole image), select hue (whole image or
   connected), rectangle, and brush (right-drag erases). Modes are replace, add (Shift), subtract (Alt) and intersect.
   You can also use *All*, *None*, *Invert*, *Subject* (auto foreground), *Grow* and *Shrink*.
+* **Paint pixels (mirrored):** a hard-edged pixel brush with no antialiasing, from 1 pixel wide (the default) up.
+  Every stroke is mirrored across the middle of the image (left ↔ right by default, or top ↕ bottom, both, or off).
+  Pick any colour, including transparency; right-drag paints transparent. It can be limited to the selection.
+* **Outline:** *Paint outline inside selection* paints the paint colour along the inside edge of the selection,
+  1 pixel thick by default (adjustable). You can leave out the top, bottom, left and/or right end of each selected
+  shape, each with its own depth in pixels - e.g. leave the open end of a sleeve or a hem without an outline.
 * **Recolour:** apply a palette to the selection, either by region matching (keeps shading, optional second palette)
   or as a gradient map. Click a single swatch to tint the selection with that colour.
 * **Patterns:** patterns are masked to the selection. You can tile them, scale them with antialiasing on or off, offset them,

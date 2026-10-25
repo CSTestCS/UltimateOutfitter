@@ -24,6 +24,7 @@ TOOLS = [
     ("hue_wand", "Select hue (connected)"),
     ("rect", "Rectangle"),
     ("brush", "Brush"),
+    ("paint", "Paint pixels (mirrored, no antialiasing)"),
     ("pan", "Pan / zoom"),
 ]
 
@@ -33,6 +34,8 @@ class Canvas(QGraphicsView):
     rect_selected = Signal(int, int, int, int, object)
     brushed = Signal(int, int, bool)          # x, y, erase (right button)
     brush_released = Signal()
+    painted = Signal(int, int, bool)          # x, y, erase (right button) - pixel paint tool
+    paint_released = Signal()
 
     def __init__(self):
         super().__init__()
@@ -80,6 +83,8 @@ class Canvas(QGraphicsView):
             self.rubber.setVisible(True)
         elif self.tool == "brush":
             self.brushed.emit(x, y, e.button() == Qt.MouseButton.RightButton)
+        elif self.tool == "paint":
+            self.painted.emit(x, y, e.button() == Qt.MouseButton.RightButton)
         else:
             self.clicked.emit(x, y, e.modifiers())
 
@@ -92,6 +97,8 @@ class Canvas(QGraphicsView):
             self.rubber.setRect(QRectF(self._drag_start, p).normalized())
         elif self.tool == "brush" and e.buttons():
             self.brushed.emit(x, y, bool(e.buttons() & Qt.MouseButton.RightButton))
+        elif self.tool == "paint" and e.buttons():
+            self.painted.emit(x, y, bool(e.buttons() & Qt.MouseButton.RightButton))
 
     def mouseReleaseEvent(self, e):
         if self.dragMode() == QGraphicsView.DragMode.ScrollHandDrag:
@@ -106,6 +113,8 @@ class Canvas(QGraphicsView):
                                     int(np.ceil(r.bottom())), e.modifiers())
         elif self.tool == "brush":
             self.brush_released.emit()
+        elif self.tool == "paint":
+            self.paint_released.emit()
 
 
 class EditorTab(QWidget):
@@ -125,6 +134,8 @@ class EditorTab(QWidget):
         self.canvas.rect_selected.connect(self._on_rect)
         self.canvas.brushed.connect(self._on_brush)
         self.canvas.brush_released.connect(self._end_brush)
+        self.canvas.painted.connect(self._on_paint)
+        self.canvas.paint_released.connect(self._end_paint)
         self.status = QLabel("Open an image to start editing.")
 
         # ---- file
@@ -148,7 +159,7 @@ class EditorTab(QWidget):
         filebar.addStretch(1)
 
         # ---- selection tools
-        sel_box = QGroupBox("Selection")
+        sel_box = QGroupBox("Tools && selection")
         sl = QVBoxLayout(sel_box)
         self.tool_group = QButtonGroup(self)
         for i, (tid, label) in enumerate(TOOLS):
@@ -296,9 +307,61 @@ class EditorTab(QWidget):
         pl.addRow(b_pat)
         pl.addRow(b_erase)
 
+        # ---- pixel paint & outline
+        paint_box = QGroupBox("Paint && outline (no antialiasing)")
+        pf = QFormLayout(paint_box)
+        self.paint_rgba = (0, 0, 0, 255)
+        self.paint_color = QPushButton()
+        self.paint_color.setToolTip("Paint colour (with transparency)")
+        self.paint_color.clicked.connect(self._choose_paint_color)
+        self._show_paint_color()
+        self.paint_size = QSpinBox()
+        self.paint_size.setRange(1, 256)
+        self.paint_size.setValue(1)
+        self.paint_size.setSuffix(" px")
+        self.paint_mirror = QComboBox()
+        self.paint_mirror.addItem("Left ↔ right", "x")
+        self.paint_mirror.addItem("Top ↕ bottom", "y")
+        self.paint_mirror.addItem("Both (4 ways)", "xy")
+        self.paint_mirror.addItem("Off", "none")
+        self.paint_in_sel = QCheckBox("Only paint inside the selection")
+        pf.addRow(QLabel("Choose “Paint pixels” above, then left-drag to paint (right-drag paints "
+                         "transparent). Every stroke is mirrored across the middle of the image."))
+        pf.addRow("Colour", self.paint_color)
+        pf.addRow("Brush size", self.paint_size)
+        pf.addRow("Mirror", self.paint_mirror)
+        pf.addRow(self.paint_in_sel)
+        self.outline_px = QSpinBox()
+        self.outline_px.setRange(1, 64)
+        self.outline_px.setValue(1)
+        self.outline_px.setSuffix(" px")
+        pf.addRow(QLabel("<b>Outline</b> - painted on the inside edge of the selection:"))
+        pf.addRow("Thickness", self.outline_px)
+        self.omit: dict[str, tuple[QCheckBox, QSpinBox]] = {}
+        for side_name, label in (("top", "Top"), ("bottom", "Bottom"), ("left", "Left"), ("right", "Right")):
+            cb = QCheckBox(f"Leave out the {label.lower()} end")
+            depth = QSpinBox()
+            depth.setRange(1, 2000)
+            depth.setValue(1)
+            depth.setSuffix(" px")
+            depth.setToolTip(f"How far from the {label.lower()}-most edge of each selected shape the outline "
+                             "is left out")
+            depth.setEnabled(False)
+            cb.toggled.connect(depth.setEnabled)
+            row_o = QHBoxLayout()
+            row_o.addWidget(cb, 1)
+            row_o.addWidget(QLabel("depth"))
+            row_o.addWidget(depth)
+            pf.addRow(row_o)
+            self.omit[side_name] = (cb, depth)
+        b_outline = QPushButton("Paint outline inside selection")
+        b_outline.clicked.connect(self.paint_outline)
+        pf.addRow(b_outline)
+
         side = QWidget()
         sv = QVBoxLayout(side)
         sv.addWidget(sel_box)
+        sv.addWidget(paint_box)
         sv.addWidget(rec_box)
         sv.addWidget(pat_box)
         sv.addStretch(1)
@@ -531,6 +594,54 @@ class EditorTab(QWidget):
     def _end_brush(self):
         self._brushing = False
         self._refresh()
+
+    # ------------------------------------------------------------------ pixel paint
+    def _show_paint_color(self):
+        r, g, b, a = self.paint_rgba
+        pm = QPixmap(48, 16)
+        pm.fill(QColor(r, g, b, a))
+        self.paint_color.setIcon(QIcon(pm))
+        self.paint_color.setText(f"#{r:02X}{g:02X}{b:02X}" + (f"  ({round(a / 2.55)}%)" if a < 255 else ""))
+
+    def _choose_paint_color(self):
+        from PySide6.QtWidgets import QColorDialog
+        c = QColorDialog.getColor(QColor(*self.paint_rgba), self, "Paint colour",
+                                  QColorDialog.ColorDialogOption.ShowAlphaChannel)
+        if c.isValid():
+            self.paint_rgba = (c.red(), c.green(), c.blue(), c.alpha())
+            self._show_paint_color()
+
+    def _on_paint(self, x, y, erase):
+        if self.image is None:
+            return
+        if not getattr(self, "_painting", False):
+            self._push()
+            self._painting = True
+            self._paint_last = None
+        last = self._paint_last
+        pts = imaging.line_points(last[0], last[1], x, y) if last else [(x, y)]
+        self._paint_last = (x, y)
+        h, w = self.image.shape[:2]
+        pts = imaging.mirror_points(pts, w, h, self.paint_mirror.currentData())
+        limit = self.selection if self.paint_in_sel.isChecked() and self.selection.any() else None
+        rgba = (0, 0, 0, 0) if erase else self.paint_rgba
+        if imaging.paint_pixels(self.image, pts, self.paint_size.value(), rgba, limit).any():
+            self.dirty = True
+            self._refresh()
+
+    def _end_paint(self):
+        self._painting = False
+        self._paint_last = None
+        self._refresh()
+
+    def paint_outline(self):
+        if not self._require_selection():
+            return
+        omit = {name: depth.value() for name, (cb, depth) in self.omit.items() if cb.isChecked()}
+        outline = imaging.inner_outline(self.selection, self.outline_px.value(), omit)
+        out = self.image.copy()
+        out[outline] = np.array(self.paint_rgba, dtype=np.uint8)
+        self._commit(out)
 
     def select_all(self):
         if self.image is not None:

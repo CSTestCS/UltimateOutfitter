@@ -1046,3 +1046,25 @@ def test_opaque_textures_are_coloured_everywhere(lib, tmp_path):
     assert not (body == (255, 0, 128)).all(axis=1).any()      # the pink body was recoloured too
     assert {tuple(px) for px in body} | {tuple(px) for px in hem} <= {(0x10, 0x18, 0x40), (0xC0, 0x90, 0x30)}
     assert {tuple(px) for px in body} != {tuple(px) for px in hem}   # body and hem got different palettes
+
+
+def test_pixel_paint_and_inner_outline():
+    from ultimate_outfitter.core import imaging as im
+    img = np.zeros((6, 8, 4), np.uint8)
+    pts = im.mirror_points(im.line_points(0, 1, 2, 1), 8, 6, "x")
+    hit = im.paint_pixels(img, pts, 1, (255, 0, 0, 255))
+    assert hit.sum() == 6                                    # 3 pixels + their mirror images, nothing else
+    assert (img[1, 0:3, 0] == 255).all() and (img[1, 5:8, 0] == 255).all() and img[1, 3:5, 0].sum() == 0
+    assert set(np.unique(img[..., 0])) <= {0, 255}           # no antialiasing
+    assert len(im.brush_offsets(1)) == 1 and len(im.brush_offsets(4)) > 9
+    # outline on the inside edge, thickness 1 / 2, and omitting the bottom end of each shape
+    sel = np.zeros((10, 14), bool)
+    sel[1:9, 1:6] = True
+    sel[1:9, 8:13] = True                                    # two separate shapes (e.g. two sleeves)
+    one = im.inner_outline(sel)
+    assert not (one & ~sel).any() and one[1, 1] and not one[4, 3]
+    two = im.inner_outline(sel, 2)
+    assert two[2, 2] and not two[4, 3]
+    open_end = im.inner_outline(sel, 1, {"bottom": 2})
+    assert not open_end[7:9].any() and open_end[6, 1] and open_end[6, 8]   # both shapes lose their bottoms
+    assert open_end[1].any()

@@ -699,3 +699,121 @@ def apply_pattern(img: np.ndarray, mask: np.ndarray, pattern: np.ndarray, *, sca
     out[..., :3][mask] = np.clip(mixed[mask], 0, 255).round().astype(np.uint8)
     return out
 
+
+
+# ---------------------------------------------------------------------------
+# Pixel painting (no antialiasing) and outlines
+# ---------------------------------------------------------------------------
+
+def brush_offsets(size: int) -> list[tuple[int, int]]:
+    """Pixel offsets of a hard brush ``size`` pixels wide (1 = a single pixel, round from 3 up)."""
+    size = max(1, int(size))
+    c = (size - 1) / 2.0
+    r2 = (size / 2.0) ** 2
+    lo = -int(np.floor(c))
+    out = []
+    for j in range(size):
+        for i in range(size):
+            if size <= 2 or (i - c) ** 2 + (j - c) ** 2 <= r2:
+                out.append((lo + i, lo + j))
+    return out
+
+
+def line_points(x0: int, y0: int, x1: int, y1: int) -> list[tuple[int, int]]:
+    """Every pixel on the line from (x0, y0) to (x1, y1) (Bresenham), so fast strokes leave no gaps."""
+    pts = []
+    dx, dy = abs(x1 - x0), -abs(y1 - y0)
+    sx, sy = (1 if x0 < x1 else -1), (1 if y0 < y1 else -1)
+    err = dx + dy
+    x, y = x0, y0
+    while True:
+        pts.append((x, y))
+        if x == x1 and y == y1:
+            return pts
+        e2 = 2 * err
+        if e2 >= dy:
+            err += dy
+            x += sx
+        if e2 <= dx:
+            err += dx
+            y += sy
+
+
+def mirror_points(points, width: int, height: int, mirror: str) -> list[tuple[int, int]]:
+    """Add the mirrored copies of ``points``: mirror = "none" | "x" (left-right) | "y" (top-bottom) | "xy"."""
+    out = list(points)
+    if mirror in ("x", "xy"):
+        out += [(width - 1 - x, y) for x, y in points]
+    if mirror in ("y", "xy"):
+        out += [(x, height - 1 - y) for x, y in points]
+    if mirror == "xy":
+        out += [(width - 1 - x, height - 1 - y) for x, y in points]
+    return out
+
+
+def paint_pixels(img: np.ndarray, points, size: int, rgba, limit: np.ndarray | None = None) -> np.ndarray:
+    """Hard-edged painting: every pixel under the brush becomes exactly ``rgba`` (no antialiasing)."""
+    h, w = img.shape[:2]
+    hit = np.zeros((h, w), dtype=bool)
+    offs = brush_offsets(size)
+    for x, y in points:
+        for dx, dy in offs:
+            px, py = x + dx, y + dy
+            if 0 <= px < w and 0 <= py < h:
+                hit[py, px] = True
+    if limit is not None:
+        hit &= limit
+    img[hit] = np.array(rgba, dtype=np.uint8)
+    return hit
+
+
+def _erode4(mask: np.ndarray) -> np.ndarray:
+    """Shrink by one pixel (4-neighbourhood; outside the image counts as outside)."""
+    p = np.pad(mask, 1)
+    return mask & p[:-2, 1:-1] & p[2:, 1:-1] & p[1:-1, :-2] & p[1:-1, 2:]
+
+
+def components(mask: np.ndarray) -> list[np.ndarray]:
+    """The separate (8-connected) shapes of a mask."""
+    out = []
+    remaining = mask.copy()
+    while remaining.any():
+        y, x = np.argwhere(remaining)[0]
+        comp = connected_region(remaining, (int(x), int(y)), diagonal=True)
+        out.append(comp)
+        remaining &= ~comp
+    return out
+
+
+def inner_outline(selection: np.ndarray, thickness: int = 1, omit: dict[str, int] | None = None) -> np.ndarray:
+    """Pixels of an outline drawn on the inside edge of the selection, ``thickness`` pixels wide.
+
+    ``omit`` = {"top" | "bottom" | "left" | "right": depth}: for each separate shape of the selection,
+    leave out the outline within ``depth`` pixels of that shape's furthest end in that direction
+    (e.g. the open bottom end of a sleeve).
+    """
+    inner = selection.copy()
+    for _ in range(max(1, int(thickness))):
+        inner = _erode4(inner)
+    outline = selection & ~inner
+    if not omit:
+        return outline
+    out = np.zeros_like(outline)
+    for comp in components(selection):
+        ys, xs = np.nonzero(comp)
+        keep = outline & comp
+        yy, xx = np.mgrid[0:comp.shape[0], 0:comp.shape[1]]
+        for side, depth in omit.items():
+            depth = max(0, int(depth))
+            if not depth:
+                continue
+            if side == "top":
+                keep &= ~(yy < ys.min() + depth)
+            elif side == "bottom":
+                keep &= ~(yy > ys.max() - depth)
+            elif side == "left":
+                keep &= ~(xx < xs.min() + depth)
+            elif side == "right":
+                keep &= ~(xx > xs.max() - depth)
+        out |= keep
+    return out
