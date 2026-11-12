@@ -146,8 +146,11 @@ The app never overwrites files it creates automatically. If a name is taken, it 
    background) are coloured everywhere, including their border colour.
 
    When colouring automatically, the app never touches pixels below 10% opacity, which leaves leftover
-   cleanup specks alone. With a **shades of one colour** palette, the most neutral (middle) shade becomes the
-   main colour, and the lighter and darker shades are used for highlights, shading and details.
+   cleanup specks alone. With a **shades of one colour** palette, what happens depends on how many tones the
+   coloured part of the item has. With fewer tones than the palette has shades (e.g. one or two tones and three
+   shades), the most neutral (middle) shade is the main colour, and the other tones take the next lighter /
+   darker shades. With as many tones as shades or more, the shades follow the item's own shading: its darkest
+   tone takes the darkest shade, its lightest the lightest, even when the main colour is the lightest tone.
 
    Files are saved as `Characters/<Name>/Wardrobe/<Name>-<Item>-<Palette>.png` and added to the dresser.
    **Add a specific piece…** (under the build buttons and on the *Wardrobe* page) makes one piece by hand. You

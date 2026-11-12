@@ -1068,3 +1068,48 @@ def test_pixel_paint_and_inner_outline():
     open_end = im.inner_outline(sel, 1, {"bottom": 2})
     assert not open_end[7:9].any() and open_end[6, 1] and open_end[6, 8]   # both shapes lose their bottoms
     assert open_end[1].any()
+
+
+def test_shades_palette_middle_shade_is_primary_when_item_has_fewer_tones():
+    from ultimate_outfitter.core.imaging import recolor_regions
+    light, mid, dark = "#E0C0A0", "#A07040", "#503010"
+    pal = [light, dark, mid]                                 # order in the palette doesn't matter
+
+    def item(tones):
+        """Rows of flat tones (grey levels), the first one the largest area."""
+        arr = np.zeros((40, 40, 4), np.uint8)
+        arr[..., 3] = 255
+        arr[..., :3] = tones[0]
+        for i, t in enumerate(tones[1:]):
+            arr[30 + 5 * i: 35 + 5 * i, :, :3] = t
+        return arr
+
+    def colours(arr):
+        out = recolor_regions(arr, np.ones(arr.shape[:2], bool), [pal], kinds=["shades"], lock=True)
+        return "#%02X%02X%02X" % tuple(out[5, 5, :3]), ["#%02X%02X%02X" % tuple(out[32 + 5 * i, 5, :3])
+                                                        for i in range(len(arr) and 2)]
+
+    # one tone: the middle shade
+    main, _ = colours(item([120]))
+    assert main == mid
+    # two tones, the other darker: main = middle, detail = dark
+    main, (detail, _) = colours(item([150, 60]))
+    assert (main, detail) == (mid, dark)
+    # two tones, the other lighter: main = middle, detail = light
+    main, (detail, _) = colours(item([90, 200]))
+    assert (main, detail) == (mid, light)
+    # three tones and three shades: follows the item's own shading, even if the main tone is the lightest
+    main, (a, b) = colours(item([220, 40, 130]))
+    assert (main, a, b) == (light, dark, mid)
+    # the same rules without the colour lock (shading kept): nearest shade of each part
+    from ultimate_outfitter.core.colors import hex_to_rgb
+
+    def nearest(px):
+        return min(pal, key=lambda h: sum((int(c) - v) ** 2 for c, v in zip(px, hex_to_rgb(h))))
+
+    for tones, want in (([120], [mid]), ([150, 60], [mid, dark]), ([90, 200], [mid, light]),
+                        ([220, 40, 130], [light, dark, mid])):
+        arr = item(tones)
+        out = recolor_regions(arr, np.ones(arr.shape[:2], bool), [pal], kinds=["shades"], lock=False)
+        got = [nearest(out[5, 5, :3])] + [nearest(out[32 + 5 * i, 5, :3]) for i in range(len(tones) - 1)]
+        assert got == want, (tones, got)

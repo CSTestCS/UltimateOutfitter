@@ -316,8 +316,16 @@ def _assign_targets(region_ids: list[int], centers: np.ndarray, share: np.ndarra
     """Map each region to a palette index (palette sorted dark -> light)."""
     out: dict[int, int] = {}
     if kind == "shades":
-        # the most neutral (middle) shade is the primary colour of the largest region;
-        # lighter regions take lighter shades, darker regions darker shades (shading / details)
+        total = float(sum(share[r] for r in region_ids)) or 1.0
+        tones = [r for r in region_ids if share[r] / total >= 0.005]
+        if len(tones) >= len(pal) > 1:
+            # as many tones as shades (or more): follow the item's own shading, dark -> light
+            ordered = sorted(region_ids, key=lambda r: centers[r][0])
+            for rank, r in enumerate(ordered):
+                out[r] = int(round(rank * (len(pal) - 1) / max(1, len(ordered) - 1)))
+            return out
+        # fewer tones than shades: the most neutral (middle) shade is the primary colour of the
+        # largest region; lighter regions take lighter shades, darker regions darker shades
         neutral = len(pal) // 2
         by_area = sorted(region_ids, key=lambda r: -share[r])
         main = by_area[0]
@@ -339,6 +347,35 @@ def _assign_targets(region_ids: list[int], centers: np.ndarray, share: np.ndarra
     return out
 
 
+def _tone_clusters(L: np.ndarray, tol: float = 3.0, min_share: float = 0.005) -> tuple[np.ndarray, np.ndarray]:
+    """The distinct tones (lightness levels) among pixels: (centres dark -> light, pixel counts).
+
+    Lightness values within ``tol`` of each other are one tone; tones covering less than ``min_share``
+    of the pixels (antialiased edges, specks) are dropped.
+    """
+    if not len(L):
+        return np.zeros(0), np.zeros(0)
+    vals, counts = np.unique(np.round(L).astype(int), return_counts=True)
+    centres, sizes = [], []
+    cur_v, cur_c = [vals[0]], [counts[0]]
+    for v, c in zip(vals[1:], counts[1:]):
+        # one tone spans at most 2 x tol, so a smooth gradient counts as many tones, not one
+        if v - cur_v[-1] <= tol and v - cur_v[0] <= 2 * tol:
+            cur_v.append(v)
+            cur_c.append(c)
+        else:
+            centres.append(np.average(cur_v, weights=cur_c))
+            sizes.append(sum(cur_c))
+            cur_v, cur_c = [v], [c]
+    centres.append(np.average(cur_v, weights=cur_c))
+    sizes.append(sum(cur_c))
+    centres, sizes = np.array(centres), np.array(sizes)
+    keep = sizes >= min_share * len(L)
+    if not keep.any():
+        keep = sizes == sizes.max()
+    return centres[keep], sizes[keep]
+
+
 def recolor_regions_multi(imgs: Sequence[np.ndarray], masks: Sequence[np.ndarray],
                           palettes: Sequence[Sequence[str]], kinds: Sequence[str] | None = None,
                           regions: int | None = None, strength: float = 1.0,
@@ -356,9 +393,11 @@ def recolor_regions_multi(imgs: Sequence[np.ndarray], masks: Sequence[np.ndarray
     Returns (recoloured images, primary masks) - the primary mask marks the largest
     region of the first palette in each image (used for prints / patterns).
     With ``lock`` every pixel gets an exact palette colour (no in-between colours): a region
-    of a "varied" palette takes exactly its assigned colour; for a "shades" palette all
-    pixels coloured with it are ranked by lightness - the brightest take the brightest shade,
-    the darkest the darkest shade, everything between the proportionally matching shade.
+    of a "varied" palette takes exactly its assigned colour. For a "shades" palette the item's
+    distinct tones in the parts it colours are counted: with fewer tones than shades, the main
+    (largest) tone takes the middle shade and the other tones the next lighter / darker shades;
+    with as many tones as shades or more, the tones follow the item's own shading - the brightest
+    take the brightest shade, the darkest the darkest, everything between the matching shade.
     If ``palette_masks_out`` is a list, it receives one entry per image: a list with one
     boolean mask per palette marking exactly the pixels that palette coloured.
     """
@@ -388,14 +427,28 @@ def recolor_regions_multi(imgs: Sequence[np.ndarray], masks: Sequence[np.ndarray
     lab_cache = [rgb_to_lab(im[..., :3][m].astype(float)) if m.any() else np.zeros((0, 3))
                  for im, m in zip(imgs, masks)]
     group_range: dict[int, tuple[float, float]] = {}
+    group_tones: dict[int, tuple[np.ndarray, np.ndarray]] = {}   # few tones: (tone centres, shade per tone)
     if lock:
-        # lightness range of everything each palette colours, across all images of the item
+        # lightness of everything each palette colours, across all images of the item
         for g in range(len(palettes)):
             region_ids = [r for r, (gg, _) in targets.items() if gg == g]
             Ls = [lab[:, 0][np.isin(lbl[m], region_ids)] for lab, lbl, m in zip(lab_cache, labels, masks) if m.any()]
             Ls = np.concatenate(Ls) if Ls else np.zeros(0)
-            if len(Ls):
-                group_range[g] = (float(np.percentile(Ls, 1)), float(np.percentile(Ls, 99)))
+            if not len(Ls):
+                continue
+            group_range[g] = (float(np.percentile(Ls, 1)), float(np.percentile(Ls, 99)))
+            n_shades = len(pal_rgb[g])
+            if kinds[g] == "shades" and n_shades > 1:
+                centres, sizes = _tone_clusters(Ls)
+                if len(centres) < n_shades:
+                    # fewer tones than shades: the main tone is the middle shade, the others step
+                    # lighter / darker from it in order
+                    neutral = n_shades // 2
+                    main = int(sizes.argmax())
+                    shade = np.empty(len(centres), dtype=int)
+                    for i in range(len(centres)):
+                        shade[i] = min(n_shades - 1, max(0, neutral + (i - main)))
+                    group_tones[g] = (centres, shade)
     for n, (img, mask, lbl, out, prim) in enumerate(zip(imgs, masks, labels, outs, primaries)):
         if not mask.any():
             continue
@@ -409,7 +462,11 @@ def recolor_regions_multi(imgs: Sequence[np.ndarray], masks: Sequence[np.ndarray
                 if not sel.any():
                     continue
                 colors = pal_rgb[g]
-                if kinds[g] == "shades" and len(colors) > 1 and g in group_range:
+                if g in group_tones:
+                    centres, shade = group_tones[g]
+                    nearest = np.abs(lab_all[sel, 0][:, None] - centres[None, :]).argmin(axis=1)
+                    new_rgb[sel] = colors[shade[nearest]]
+                elif kinds[g] == "shades" and len(colors) > 1 and g in group_range:
                     lo, hi = group_range[g]
                     if hi - lo < 4:   # flat area: keep its assigned (neutral / detail) shade
                         idx = np.full(int(sel.sum()), ci)
