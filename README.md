@@ -127,9 +127,11 @@ The app never overwrites files it creates automatically. If a name is taken, it 
 
    **Locked palette colours (default):** *Lock pieces to the exact palette colours / shades* (on by default; the
    Image Editor has the same checkbox) makes every coloured pixel an exact colour from the palette, with no
-   in-between shading. For a *shades of one colour* palette each region is mapped onto the palette's shades: the
-   brightest part of the region takes the brightest shade, the darkest part the darkest shade, and everything in
-   between snaps to the shade at the same relative brightness. Untick it for the softer, shading-preserving recolour.
+   in-between shading. For a *shades of one colour* palette: if the part it colours has fewer tones than the
+   palette has shades, its main tone takes the middle shade and the other tones the next lighter / darker shades;
+   if it has as many tones or more, the brightest tone takes the brightest shade, the darkest the darkest shade,
+   and everything in between snaps to the shade at the same relative brightness. Untick it for the softer,
+   shading-preserving recolour.
 
    **Every palette shows up:** if a piece is made with two or three palettes but its image has only one colour,
    a print is added so the extra palettes are used: a suitable pattern from your library when one fits, otherwise
