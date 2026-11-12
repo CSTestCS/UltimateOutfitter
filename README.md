@@ -91,7 +91,10 @@ The app never overwrites files it creates automatically. If a name is taken, it 
   recolour them with a palette, choose a blend mode (keep shading, replace or multiply) and set the opacity.
 * The pattern's **cutaway** can be switched on or off when applying it. *Erase texture* also restores
   cut-away pixels.
-* **Erase texture** restores the original pixels inside the selection. Undo, redo and *Revert all* are available.
+* **Erase texture** restores the original pixels inside the selection. Undo (**Ctrl+Z**), redo (**Ctrl+R**) and
+  *Revert all* are available.
+* **Zoom** with the mouse wheel towards the point under the mouse; pan with the middle mouse button or the
+  *Pan / zoom* tool; *Fit* shows the whole image.
 * **Save (overwrite)** replaces the original file. **Save as new…** writes a new file.
 
 ## C. Character wardrobe creator

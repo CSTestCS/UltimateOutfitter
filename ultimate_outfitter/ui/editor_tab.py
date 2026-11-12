@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtGui import QBrush, QColor, QIcon, QKeySequence, QPainter, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
                                QFormLayout, QGraphicsPixmapItem, QGraphicsRectItem, QGraphicsScene,
                                QGraphicsView, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
@@ -40,9 +40,14 @@ class Canvas(QGraphicsView):
     def __init__(self):
         super().__init__()
         self.setScene(QGraphicsScene(self))
-        self.setBackgroundBrush(QBrush(checker_pixmap()))
+        self._checker = QBrush(checker_pixmap())
         self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
-        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        # zooming is anchored by hand on the wheel position (Qt's AnchorUnderMouse only knows the mouse
+        # position from move events, which the canvas gets only while a button is held)
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.NoAnchor)
+        self.setResizeAnchor(QGraphicsView.ViewportAnchor.NoAnchor)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.pix_item = QGraphicsPixmapItem()
         self.overlay_item = QGraphicsPixmapItem()
         self.scene().addItem(self.pix_item)
@@ -58,14 +63,30 @@ class Canvas(QGraphicsView):
     def set_images(self, pixmap: QPixmap, overlay: QPixmap | None):
         self.pix_item.setPixmap(pixmap)
         self.overlay_item.setPixmap(overlay if overlay else QPixmap())
-        self.scene().setSceneRect(QRectF(pixmap.rect()))
+        # room around the image, so any point of it can be zoomed towards / panned to the middle
+        r = QRectF(pixmap.rect())
+        m = max(r.width(), r.height()) * 4 + 2000
+        self.scene().setSceneRect(r.adjusted(-m, -m, m, m))
+
+    def drawBackground(self, painter, rect):
+        painter.fillRect(rect, QColor(55, 55, 58))
+        img = QRectF(self.pix_item.pixmap().rect())
+        if not img.isEmpty():
+            painter.fillRect(rect.intersected(img), self._checker)   # transparency checker only behind the image
 
     def fit(self):
         self.fitInView(self.pix_item, Qt.AspectRatioMode.KeepAspectRatio)
+        self.centerOn(self.pix_item)
 
     def wheelEvent(self, e):
+        """Zoom towards the mouse: the image point under the pointer stays under the pointer."""
         f = 1.25 if e.angleDelta().y() > 0 else 0.8
+        pos = e.position().toPoint()
+        before = self.mapToScene(pos)
         self.scale(f, f)
+        after = self.mapToScene(pos)
+        self.translate(after.x() - before.x(), after.y() - before.y())
+        e.accept()
 
     def _img_pos(self, e):
         p = self.mapToScene(e.position().toPoint())
@@ -153,6 +174,12 @@ class EditorTab(QWidget):
         b_redo.clicked.connect(self.redo)
         b_revert.clicked.connect(self.revert)
         b_fit.clicked.connect(self.canvas.fit)
+        b_undo.setToolTip("Undo (Ctrl+Z)")
+        b_redo.setToolTip("Redo (Ctrl+R)")
+        for keys, fn in (("Ctrl+Z", self.undo), ("Ctrl+R", self.redo)):
+            sc = QShortcut(QKeySequence(keys), self)
+            sc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)   # only while the editor tab is shown
+            sc.activated.connect(fn)
         filebar = QHBoxLayout()
         for b in (b_open, b_save, b_save_as, b_undo, b_redo, b_revert, b_fit):
             filebar.addWidget(b)
